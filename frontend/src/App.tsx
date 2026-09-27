@@ -656,7 +656,7 @@ function App() {
 
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6 flex-1 min-h-0">
           
-          <div className="col-span-1 md:col-span-7 lg:col-span-8 relative w-full min-h-[450px] md:min-h-[600px] lg:min-h-[700px]">
+          <div className="col-span-1 md:col-span-7 lg:col-span-8 relative w-full h-[450px] md:h-full">
             
             {/* LIVE Indicator */}
             {isMonitoring && (
@@ -709,7 +709,7 @@ function App() {
             </div>
           </div>
 
-          <div className="col-span-1 md:col-span-5 lg:col-span-4 flex flex-col min-h-[400px] md:min-h-0">
+          <div className="col-span-1 md:col-span-5 lg:col-span-4 flex flex-col min-h-[400px] md:h-full md:min-h-0 md:overflow-hidden">
             <div className="bg-panel backdrop-blur-xl rounded-xl border border-border-dark p-4 md:p-6 flex flex-col gap-4 md:gap-6 shadow-2xl flex-1 md:h-full md:custom-scrollbar md:overflow-y-auto">
               
               <h2 className="text-accent text-xs md:text-sm font-bold flex items-center gap-2 uppercase tracking-widest border-b border-accent/20 pb-2 m-0">
