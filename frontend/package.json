@@ -25,6 +25,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@spotify/basic-pitch": "^1.0.1",
+    "@vercel/analytics": "^2.0.1",
     "midi-writer-js": "^3.2.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
