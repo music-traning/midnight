@@ -713,7 +713,6 @@ function App() {
               </div>
             </div>
           </div>
-          </div>
 
           <div className="col-span-1 md:col-span-5 lg:col-span-4 flex flex-col min-h-[400px] md:h-full md:min-h-0 md:overflow-hidden">
             <div className="bg-panel backdrop-blur-xl rounded-xl border border-border-dark p-4 md:p-6 flex flex-col gap-4 md:gap-6 shadow-2xl flex-1 md:h-full md:custom-scrollbar md:overflow-y-auto">
