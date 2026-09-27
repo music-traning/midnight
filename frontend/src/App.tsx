@@ -389,21 +389,16 @@ function App() {
         const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType });
         chunksRef.current = [];
         
-        if (isAutoStoppedRef.current) {
-          isAutoStoppedRef.current = false;
-          const reqId = ++aiRequestCountRef.current;
-          setEvaluations([{ 
-            score: null, 
-            message: "もうやめときな。今日はそのくらいにしておけ。……指が擦り切れるぜ。", 
-            expression: "point" 
-          }]);
-          setCurrentIndex(0);
-          return;
-        }
+        const wasAutoStopped = isAutoStoppedRef.current;
+        isAutoStoppedRef.current = false;
 
         setIsAnalyzing(true);
         const reqId = ++aiRequestCountRef.current;
-        setEvaluations([{ score: null, message: "AI解析中だ。少し待ってな...", expression: "think" }]);
+        setEvaluations([{ 
+          score: null, 
+          message: wasAutoStopped ? "もうやめときな。今日はそのくらいにしておけ。……指が擦り切れるぜ。" : "AI解析中だ。少し待ってな...", 
+          expression: wasAutoStopped ? "point" : "think" 
+        }]);
         setCurrentIndex(0);
         
         try {
@@ -427,18 +422,17 @@ function App() {
 
           const basicPitch = new BasicPitch('https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json');
           
-          let lastFrames: number[][] = [];
-          let lastOnsets: number[][] = [];
-          let lastContours: number[][] = [];
+          console.log(`[DEBUG] Audio buffer decoded. Duration: ${audioBuffer.duration}s`);
+          const lastFrames: number[][] = [];
+          const lastOnsets: number[][] = [];
+          const lastContours: number[][] = [];
 
-          // Wait for the model evaluation to fully complete
-          // BasicPitch calls the callback incrementally, so we just capture the final cumulative data
           await basicPitch.evaluateModel(
             monoData,
             (frames: number[][], onsets: number[][], contours: number[][]) => {
-              lastFrames = frames;
-              lastOnsets = onsets;
-              lastContours = contours;
+              lastFrames.push(...frames);
+              lastOnsets.push(...onsets);
+              lastContours.push(...contours);
             },
             (percent: number) => {}
           );
@@ -500,6 +494,7 @@ function App() {
             };
           });
 
+          console.log(`[DEBUG] 抽出された総ノート数 (deduplicated): ${theoryNotes.length}`);
           setTheoryNotesState(theoryNotes);
 
           // Chunk theoryNotes by loop (4 bars)
@@ -515,78 +510,111 @@ function App() {
 
           if (validLoops.length === 0) {
             if (reqId !== aiRequestCountRef.current) return;
-            setEvaluations([{ score: null, message: "音が小さすぎるか、うまく認識できなかったな。もう一度頼む。", expression: "neutral" }]);
+            const emptyMsg = { score: null, message: "音が小さすぎるか、うまく認識できなかったな。もう一度頼む。", expression: "neutral" };
+            if (wasAutoStopped) {
+              setEvaluations(prev => [prev[0], emptyMsg]);
+            } else {
+              setEvaluations([emptyMsg]);
+            }
             setIsAnalyzing(false);
             return;
           }
 
-          const newEvals: {score: number, message: string, expression: string}[] = [];
-          
+                    const allLoopsData = validLoops.map((loopNotes, index) => {
+            return {
+              loop: index + 1,
+              score: calculateScore(loopNotes),
+              notes: loopNotes.map(n => ({ chord: n.currentChord, note: n.noteName, degree: n.degree }))
+            };
+          });
+
+          if (!import.meta.env.VITE_GEMINI_API_KEY) {
+            const noKeyEvals = allLoopsData.map(d => ({
+              score: d.score,
+              message: `${d.loop}周目のスコアは${d.score}点だ。APIキーが未設定みたいだな。`,
+              expression: 'point'
+            }));
+            if (wasAutoStopped) {
+              setEvaluations(prev => [prev[0], ...noKeyEvals]);
+            } else {
+              setEvaluations(noKeyEvals);
+            }
+            setIsAnalyzing(false);
+            return;
+          }
+
           const model = genAI.getGenerativeModel({ 
             model: "gemini-3.5-flash-lite",
             generationConfig: { responseMimeType: "application/json" }
           });
 
-          for (let i = 0; i < validLoops.length; i++) {
-            const loopNotes = validLoops[i];
-            const loopScore = calculateScore(loopNotes);
-            
-            let loopMsg = "";
-            let loopExpr = "neutral";
-            
-            if (!import.meta.env.VITE_GEMINI_API_KEY) {
-              loopMsg = `ループ${i+1}のスコアは${loopScore}点だ。APIキーが未設定みたいだな。`;
-              loopExpr = 'point';
-            } else {
-              const slimNotes = loopNotes.map(n => ({
-                chord: n.currentChord,
-                note: n.noteName,
-                degree: n.degree
-              }));
-              
-              const prompt = `あなたはダークトーンのジャズバーの渋いマスターであり、凄腕のビバップギタリストです。
-以下はユーザーのループ${i+1}回目（2-5-1進行）の演奏データです。提供されたJSONデータ（フレーズの度数情報）を元に、「2-5-1」進行の全体を通したストーリーを評価してください。
-特に、「5（ドミナント）」におけるテンションの使い方のセンスと、「1（トニック）」への着地（解決）の美しさについて必ず言及してください。最初の「2」のコードだけで評価を終わらせてはいけません。
+          console.log('[DEBUG Phase 8.6] Sending to Gemini:', JSON.stringify(allLoopsData, null, 2));
+          const prompt = `あなたはダークトーンのジャズバーの渋いマスターであり、凄腕のビバップギタリストです。
+以下はユーザーが連続して弾いた最大4周分（1周=2-5-1進行）のギターソロデータです。
 
-出力は150文字〜200文字程度の純粋なセリフのみとし、愛のある辛口なトーン（日本語）を徹底してください。
-返答は必ず以下のJSONスキーマに従ってください。
-{
-  "expression": "neutral" | "smile" | "think" | "point",
-  "message": "純粋なセリフのみ"
-}
-\nスコア: ${loopScore}\n\nデータ:\n${JSON.stringify(slimNotes)}`;
-              try {
-                const result = await model.generateContent(prompt);
-                if (reqId !== aiRequestCountRef.current) return;
-                let rawText = result.response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
-                const data = JSON.parse(rawText);
-                loopMsg = data.message;
-                loopExpr = data.expression || 'neutral';
-              } catch (apiErr) {
-                console.error(apiErr);
-                loopMsg = `ループ${i+1}の解析中にエラーが起きたようだ。`;
-                loopExpr = 'neutral';
-              }
-            }
-            
-            newEvals.push({ score: loopScore, message: loopMsg, expression: loopExpr });
-            
+【データ概要】
+ループ数: ${allLoopsData.length}
+各ループのデータ:
+${JSON.stringify(allLoopsData)}
+
+【指示】
+各ループに対して、JSONスキーマに従い、必ず2, 5, 1それぞれのコードでのプレイを分析した上でセリフを生成してください。
+1. 「analysis_2」「analysis_5」「analysis_1」の各フィールドで、それぞれのコードにおいてユーザーが実際に弾いた度数（degree）をデータから読み取り、絶対に省略せずに言語化してください。
+2. 抽象的なごまかしは許されません。渡されたデータに該当コードのノートが存在しない場合は「弾いていない」と厳しく指摘してください。
+3. 最終的な「message」フィールドは、上記3つの分析結果を統合し、「2のコードでは〜、だが5のコードで〜し、最後の1への着地は〜だった」のように、3つのコードすべてに具体的に言及したセリフにしてください。
+4. 全体の展開（起承転結）を踏まえた自然な語り口で、愛のある辛口なトーン（日本語）を徹底してください。
+
+【出力JSONスキーマ】
+[
+  {
+    "loop": ループ番号,
+    "score": ループのスコア(提供された数値をそのまま返すこと),
+    "analysis_2": "最初の2のコード（例: Dm7）部分で弾かれた度数とアプローチの具体的な分析",
+    "analysis_5": "2番目の5のコード（例: G7）部分でのテンションの有無や具体的なプレイの分析",
+    "analysis_1": "最後の1のコード（例: Cmaj7）部分への解決の美しさの分析",
+    "expression": "neutral" | "smile" | "think" | "point",
+    "message": "上記3つの分析結果（analysis_2, 5, 1）を必ず全て盛り込み、自然に繋ぎ合わせたマスターの愛のある辛口セリフ"
+  }
+]`;
+
+          try {
+            const result = await model.generateContent(prompt);
             if (reqId !== aiRequestCountRef.current) return;
+            let rawText = result.response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
+            const dataArray = JSON.parse(rawText);
             
-            // Appends the new evaluation to the array.
-            // Since the first element's reference inside the array stays the same,
-            // currentEval (which points to evaluations[0]) does NOT structurally change,
-            // so the typewriter effect is NOT interrupted!
-            setEvaluations([...newEvals]);
-
-            if (i === 0) {
-              setIsAnalyzing(false); // Enable the UI immediately so they can read loop 1
+            const parsedArray = Array.isArray(dataArray) ? dataArray : (dataArray.evaluations || [dataArray]);
+            
+            const finalEvals = allLoopsData.map((d, i) => {
+              const resObj = parsedArray[i] || parsedArray[parsedArray.length - 1] || {};
+              return {
+                score: d.score,
+                message: resObj.message || `${i+1}周目も悪くないぜ。`,
+                expression: resObj.expression || 'neutral'
+              };
+            });
+            
+            if (wasAutoStopped) {
+              setEvaluations(prev => [prev[0], ...finalEvals]);
+            } else {
+              setEvaluations(finalEvals);
+            }
+          } catch (apiErr) {
+            console.error(apiErr);
+            if (reqId !== aiRequestCountRef.current) return;
+            const fallbackEvals = allLoopsData.map(d => ({
+              score: d.score,
+              message: `${d.loop}周目の解析中にエラーが起きたようだ。`,
+              expression: 'neutral'
+            }));
+            if (wasAutoStopped) {
+              setEvaluations(prev => [prev[0], ...fallbackEvals]);
+            } else {
+              setEvaluations(fallbackEvals);
             }
           }
-          
-          if (reqId === aiRequestCountRef.current && validLoops.length > 0) {
-              setIsAnalyzing(false); 
-          }
+
+          setIsAnalyzing(false);
         } catch (err) {
           console.error('[Phase 4/7] Error:', err);
           if (reqId !== aiRequestCountRef.current) return;
@@ -687,7 +715,7 @@ function App() {
                 </div>
               </div>
             )}
-\n<img 
+<img 
               src={`/master_${currentEval?.expression || 'neutral'}.png`} 
               alt="Master" 
               className="absolute left-1/2 -translate-x-1/2 bottom-[120px] md:bottom-[190px] h-auto max-h-[70%] md:max-h-[85%] w-auto object-contain z-10 drop-shadow-2xl pointer-events-none"
@@ -704,7 +732,7 @@ function App() {
                 マスター
               </div>
               <div className="text-gray-100 text-sm md:text-lg leading-relaxed font-medium min-h-[5rem] md:min-h-[7rem] whitespace-pre-wrap select-none">
-                {displayedMsg.split(/\n|\n/).map((line, i) => (
+                {displayedMsg.split(/\\\\n|\\n/).map((line, i) => (
                   <React.Fragment key={i}>
                     {line}
                     <br />
@@ -865,6 +893,13 @@ function App() {
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-5 md:w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg>
           </button>
         </div>
+        
+        {/* Footer */}
+        <footer className="absolute bottom-1 md:bottom-2 left-1/2 -translate-x-1/2 text-[10px] md:text-xs text-gray-500 hover:text-gray-300 transition-colors z-50">
+          <a href="https://note.com/jazzy_begin" target="_blank" rel="noopener noreferrer">
+            © 2026 buro
+          </a>
+        </footer>
       </div>
     </div>
   );
