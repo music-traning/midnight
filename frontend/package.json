@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"node scripts/build-worklet.mjs --watch\" \"vite\"",
-    "build:worklet": "node scripts/build-worklet.mjs",
+    "build:worklet": "node -e \"console.log('Vercel Dir Check:', require('fs').readdirSync('./public/pkg'))\" && node scripts/build-worklet.mjs",
     "build": "npm run build:worklet && tsc && vite build",
     "preview": "vite preview"
   },
