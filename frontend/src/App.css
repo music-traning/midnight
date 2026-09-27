@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Noto Sans JP', sans-serif;
+  --font-serif: 'Playfair Display', serif;
+  --color-accent: #d4af37;
+  --color-accent-hover: #f0ce62;
+  --color-bg-dark: #0d0a0b;
+  --color-panel: rgba(20, 15, 15, 0.85);
+  --color-border-dark: #3d3326;
+  --color-red-dot: #ff4747;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-dark);
+  color: #e6dfd1;
+}
+
+/* Base custom styles that Tailwind might not cover exactly */
+.pulse-dot {
+  animation: pulse-dot-anim 1.5s infinite;
+}
+@keyframes pulse-dot-anim {
+  0% { opacity: 1; }
+  50% { opacity: 0.3; }
+  100% { opacity: 1; }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.2);
+  border-radius: 4px;
+}

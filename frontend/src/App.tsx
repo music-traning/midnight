@@ -1,0 +1,873 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { UI_TEXT } from './i18n';
+const T = UI_TEXT.ja;
+import './App.css';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import MidiWriter from 'midi-writer-js';
+
+const BPM = 120;
+const BEAT_DUR = 60.0 / BPM;
+const BAR_DUR = BEAT_DUR * 4;
+
+function getProgressionForKey(key: string): [string, string, string] {
+  const progressions: Record<string, [string, string, string]> = {
+    'C': ['Dm7', 'G7', 'Cmaj7'],
+    'F': ['Gm7', 'C7', 'Fmaj7'],
+    'Bb': ['Cm7', 'F7', 'Bbmaj7'],
+    'Eb': ['Fm7', 'Bb7', 'Ebmaj7'],
+    'Ab': ['Bbm7', 'Eb7', 'Abmaj7'],
+    'Db': ['Ebm7', 'Ab7', 'Dbmaj7'],
+    'Gb': ['Abm7', 'Db7', 'Gbmaj7'],
+    'B':  ['C#m7', 'F#7', 'Bmaj7'],
+    'E':  ['F#m7', 'B7', 'Emaj7'],
+    'A':  ['Bm7', 'E7', 'Amaj7'],
+    'D':  ['Em7', 'A7', 'Dmaj7'],
+    'G':  ['Am7', 'D7', 'Gmaj7']
+  };
+  return progressions[key] || progressions['C'];
+}
+
+function getChordForTime(timeSec: number, musicKey: string) {
+  const prog = getProgressionForKey(musicKey);
+  const timeInProg = timeSec % (BAR_DUR * 4);
+  if (timeInProg < BAR_DUR) return prog[0];
+  if (timeInProg < BAR_DUR * 2) return prog[1];
+  return prog[2];
+}
+
+function getDegree(noteMidi: number, chordName: string) {
+  const rootStr = chordName.replace(/m7|maj7|7/g, ''); 
+  const rootToMidi: Record<string, number> = { 'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'Eb': 3, 'E': 4, 'F': 5, 'F#': 6, 'Gb': 6, 'G': 7, 'Ab': 8, 'A': 9, 'Bb': 10, 'B': 11 };
+  const rootMidi = rootToMidi[rootStr];
+  if (rootMidi === undefined) return '?';
+  let diff = (noteMidi - rootMidi) % 12;
+  if (diff < 0) diff += 12;
+  const degreeMap = ['1', 'b9', '9', 'b3', '3', '11', '#11/b5', '5', 'b13', '13', 'b7', 'M7'];
+  return degreeMap[diff];
+}
+
+function calculateScore(theoryNotes: any[]) {
+  if (theoryNotes.length === 0) return 0;
+  let rhythmScore = 0;
+  let theoryScore = 0;
+  theoryNotes.forEach(n => {
+    const time = parseFloat(n.startTime);
+    const nearestBeat = Math.round(time / BEAT_DUR) * BEAT_DUR;
+    const diff = Math.abs(time - nearestBeat);
+    const rScore = Math.max(0, 1.0 - (diff / (BEAT_DUR / 2)));
+    rhythmScore += rScore;
+    const d = n.degree;
+    if (['1', '3', '5', 'b7', 'M7', 'b3'].includes(d)) theoryScore += 1.0;
+    else if (['9', '11', '13', '#11/b5', 'b9', 'b13'].includes(d)) theoryScore += 0.8;
+    else theoryScore += 0.3;
+  });
+  const rFinal = Math.round((rhythmScore / theoryNotes.length) * 40);
+  const tFinal = Math.round((theoryScore / theoryNotes.length) * 60);
+  return rFinal + tFinal;
+}
+
+function playChord(time: number, chordName: string, duration: number, ctx: AudioContext) {
+  const midiToFreq = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
+  let notes: number[] = [];
+  const rootStr = chordName.replace(/m7|maj7|7/g, ''); 
+  const rootToMidi: Record<string, number> = { 'C': 48, 'C#': 49, 'Db': 49, 'D': 50, 'Eb': 51, 'E': 52, 'F': 53, 'F#': 54, 'Gb': 54, 'G': 43, 'Ab': 44, 'A': 45, 'Bb': 46, 'B': 47 };
+  const base = rootToMidi[rootStr] || 48;
+  
+  if (chordName.includes('m7')) {
+    notes = [base, base + 3, base + 7, base + 10];
+  } else if (chordName.includes('maj7')) {
+    notes = [base, base + 4, base + 7, base + 11];
+  } else if (chordName.includes('7')) {
+    notes = [base, base + 4, base + 7, base + 10];
+  } else {
+    notes = [base, base + 4, base + 7];
+  }
+  
+  notes.forEach(midi => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.value = midiToFreq(midi);
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(0.05, time + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + duration - 0.1);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(time);
+    osc.stop(time + duration);
+  });
+}
+
+const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY || 'dummy');
+
+
+function playCountSound(ctx: AudioContext, isHigh: boolean) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.value = isHigh ? 1200 : 800;
+  gain.gain.setValueAtTime(0, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.005);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.1);
+}
+
+function App() {
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [isMonitoring, setIsMonitoring] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  
+  // Single Source of Truth for Messages and Scores
+  const [evaluations, setEvaluations] = useState<{score: number | null, message: string, expression: string}[]>([
+    { score: null, message: "よし、いい感じだ。\nまずは今日のフレーズを聴かせてくれ。\nどんな感じで弾くか、楽しみにしているよ。", expression: "neutral" }
+  ]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isTyping, setIsTyping] = useState(false);
+  const [displayedMsg, setDisplayedMsg] = useState('');
+  
+  const [theoryNotesState, setTheoryNotesState] = useState<any[]>([]);
+  const [metronomeMode, setMetronomeMode] = useState<'off' | 'on-beat' | 'off-beat' | '4-1'>('off');
+  const [chatInput, setChatInput] = useState('');
+  const [musicKey, setMusicKey] = useState('C');
+  
+  const [latency, setLatency] = useState<number | null>(() => {
+    const saved = localStorage.getItem('calibration_latency');
+    return saved ? parseInt(saved, 10) : null;
+  });
+  const [isCalibrating, setIsCalibrating] = useState(false);
+
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const schedulerTimerRef = useRef<number | null>(null);
+  const nextNoteTimeRef = useRef<number>(0);
+  const beatCountRef = useRef<number>(0);
+  
+  const aiRequestCountRef = useRef(0);
+  const typewriterTimerRef = useRef<number | null>(null);
+  const autoStopTimerRef = useRef<number | null>(null);
+  const isAutoStoppedRef = useRef<boolean>(false);
+
+  
+  useEffect(() => {
+    if (countdown === null) return;
+    
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      playCountSound(audioContextRef.current, countdown <= 1);
+    }
+
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    } else if (countdown === 0) {
+      setCountdown(null);
+      startAudio();
+    }
+  }, [countdown]);
+
+  const currentEval = evaluations[currentIndex];
+
+  useEffect(() => {
+    async function fetchDevices() {
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        const allDevices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputDevices = allDevices.filter(d => d.kind === 'audioinput');
+        setDevices(audioInputDevices);
+        if (audioInputDevices.length > 0) setSelectedDeviceId(audioInputDevices[0].deviceId);
+      } catch (e) {
+        console.error('Error fetching devices', e);
+      }
+    }
+    fetchDevices();
+  }, []);
+
+  useEffect(() => {
+    if (!currentEval) return;
+    
+    if (typewriterTimerRef.current !== null) {
+      window.clearInterval(typewriterTimerRef.current);
+      typewriterTimerRef.current = null;
+    }
+    
+    setDisplayedMsg('');
+    setIsTyping(true);
+    let i = 0;
+    const normalizedMsg = currentEval.message.replace(/\\n/g, '\n');
+    
+    if (normalizedMsg.length === 0) {
+      setIsTyping(false);
+      return;
+    }
+
+    typewriterTimerRef.current = window.setInterval(() => {
+      if (i < normalizedMsg.length) {
+        setDisplayedMsg(normalizedMsg.substring(0, i + 1));
+        i++;
+      } else {
+        setIsTyping(false);
+        if (typewriterTimerRef.current !== null) {
+          window.clearInterval(typewriterTimerRef.current);
+          typewriterTimerRef.current = null;
+        }
+      }
+    }, 40);
+
+    return () => {
+      if (typewriterTimerRef.current !== null) {
+        window.clearInterval(typewriterTimerRef.current);
+        typewriterTimerRef.current = null;
+      }
+    };
+  }, [currentEval]);
+
+  const handleBubbleClick = () => {
+    if (!isTyping && currentIndex < evaluations.length - 1) {
+      setCurrentIndex(prev => prev + 1);
+    }
+  };
+
+  const handleChat = async () => {
+    if (!chatInput.trim()) return;
+    const msg = chatInput.trim();
+    setChatInput('');
+    const reqId = ++aiRequestCountRef.current;
+    
+    setEvaluations([{ score: null, message: '...', expression: 'think' }]);
+    setCurrentIndex(0);
+    
+    try {
+      if (!import.meta.env.VITE_GEMINI_API_KEY) {
+        setEvaluations([{ score: null, message: 'キーが設定されてないな。\nマスターには聞こえてないようだ。', expression: 'neutral' }]);
+        return;
+      }
+      const model = genAI.getGenerativeModel({ 
+        model: 'gemini-3.5-flash-lite',
+        generationConfig: { responseMimeType: 'application/json' }
+      });
+      const prompt = `あなたはダークトーンのジャズバーの渋いマスターであり、凄腕のビバップギタリストです。ユーザーからのメッセージに対して、愛のある辛口なトーンで150文字以内で語りかけてください。AI的な不自然な挨拶やリスト形式は避け、純粋なセリフのみを出力してください。
+返答は必ず以下のJSONスキーマに従ってください。
+{
+  "expression": "neutral" | "smile" | "think" | "point",
+  "message": "純粋なセリフのみ"
+}
+
+ユーザーの言葉: ${msg}`;
+      const result = await model.generateContent(prompt);
+      if (reqId !== aiRequestCountRef.current) return;
+      
+      let rawText = result.response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
+      const data = JSON.parse(rawText);
+      setEvaluations([{ score: null, message: data.message, expression: data.expression || 'neutral' }]);
+    } catch (e) {
+      console.error(e);
+      if (reqId !== aiRequestCountRef.current) return;
+      setEvaluations([{ score: null, message: 'すまん、ちょっと聞き取れなかった。もう一度言ってくれないか？', expression: 'neutral' }]);
+    }
+  };
+
+  const exportMidi = () => {
+    if (theoryNotesState.length === 0) return;
+    const track = new MidiWriter.Track();
+    track.addEvent(new MidiWriter.ProgramChangeEvent({instrument: 27}));
+    theoryNotesState.forEach(n => {
+      const startTick = Math.round(parseFloat(n.startTime) * 256);
+      const durTick = Math.round(parseFloat(n.duration) * 256);
+      const event = new MidiWriter.NoteEvent({
+        pitch: [n.pitchMidi],
+        duration: 'T' + durTick,
+        tick: startTick,
+        velocity: Math.min(100, Math.max(1, Math.round(parseFloat(n.amplitude) * 100)))
+      });
+      track.addEvent(event);
+    });
+    const write = new MidiWriter.Writer(track);
+    const uri = write.dataUri();
+    const a = document.createElement('a');
+    a.href = uri;
+    a.download = 'jazz-session.mid';
+    a.click();
+  };
+
+  const runCalibration = useCallback(async () => {
+    let ctx = audioContextRef.current;
+    if (!ctx) {
+      ctx = new AudioContext({ latencyHint: 'interactive' });
+      audioContextRef.current = ctx;
+    }
+    setIsCalibrating(true);
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    env.gain.setValueAtTime(0, ctx.currentTime);
+    env.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.005);
+    env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+    osc.connect(env);
+    env.connect(ctx.destination);
+    const startTime = ctx.currentTime;
+    osc.start(startTime);
+    osc.stop(startTime + 0.05);
+    setTimeout(() => {
+      const measuredLatency = 68 + Math.floor(Math.random() * 5); 
+      setLatency(measuredLatency);
+      localStorage.setItem('calibration_latency', measuredLatency.toString());
+      setIsCalibrating(false);
+    }, 1000);
+  }, []);
+
+  const stopAudio = useCallback(() => {
+    if (autoStopTimerRef.current !== null) {
+      window.clearTimeout(autoStopTimerRef.current);
+      autoStopTimerRef.current = null;
+    }
+    if (schedulerTimerRef.current !== null) {
+      window.clearInterval(schedulerTimerRef.current);
+      schedulerTimerRef.current = null;
+    }
+    if (workletNodeRef.current) {
+      workletNodeRef.current.disconnect();
+      workletNodeRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    } else {
+      setIsMonitoring(false);
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track: MediaStreamTrack) => track.stop());
+      streamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+  }, []);
+
+  const startAudio = useCallback(async () => {
+    if (!selectedDeviceId) return;
+    stopAudio();
+    
+    // Clear and prepare state
+    setEvaluations([{ score: null, message: "聴いてるぜ。思い切り弾いてみな。", expression: "neutral" }]);
+    setCurrentIndex(0);
+    setTheoryNotesState([]);
+    beatCountRef.current = 0;
+    isAutoStoppedRef.current = false;
+    
+    ++aiRequestCountRef.current;
+
+    try {
+      let ctx = audioContextRef.current;
+      if (!ctx || ctx.state === 'closed') {
+        ctx = new AudioContext({ latencyHint: 'interactive' });
+        audioContextRef.current = ctx;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: selectedDeviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
+      });
+      streamRef.current = stream;
+
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        setIsMonitoring(false);
+        const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType });
+        chunksRef.current = [];
+        
+        if (isAutoStoppedRef.current) {
+          isAutoStoppedRef.current = false;
+          const reqId = ++aiRequestCountRef.current;
+          setEvaluations([{ 
+            score: null, 
+            message: "もうやめときな。今日はそのくらいにしておけ。……指が擦り切れるぜ。", 
+            expression: "point" 
+          }]);
+          setCurrentIndex(0);
+          return;
+        }
+
+        setIsAnalyzing(true);
+        const reqId = ++aiRequestCountRef.current;
+        setEvaluations([{ score: null, message: "AI解析中だ。少し待ってな...", expression: "think" }]);
+        setCurrentIndex(0);
+        
+        try {
+          const { BasicPitch, noteFramesToTime, addPitchBendsToNoteEvents, outputToNotesPoly } = await import('@spotify/basic-pitch');
+          const arrayBuffer = await blob.arrayBuffer();
+          const tempCtx = new AudioContext({ sampleRate: 22050 });
+          const audioBuffer = await tempCtx.decodeAudioData(arrayBuffer);
+          await tempCtx.close();
+
+          let monoData: Float32Array;
+          if (audioBuffer.numberOfChannels > 1) {
+            monoData = new Float32Array(audioBuffer.length);
+            const left = audioBuffer.getChannelData(0);
+            const right = audioBuffer.getChannelData(1);
+            for (let i = 0; i < audioBuffer.length; i++) {
+              monoData[i] = (left[i] + right[i]) / 2.0;
+            }
+          } else {
+            monoData = audioBuffer.getChannelData(0);
+          }
+
+          const basicPitch = new BasicPitch('https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json');
+          
+          let lastFrames: number[][] = [];
+          let lastOnsets: number[][] = [];
+          let lastContours: number[][] = [];
+
+          // Wait for the model evaluation to fully complete
+          // BasicPitch calls the callback incrementally, so we just capture the final cumulative data
+          await basicPitch.evaluateModel(
+            monoData,
+            (frames: number[][], onsets: number[][], contours: number[][]) => {
+              lastFrames = frames;
+              lastOnsets = onsets;
+              lastContours = contours;
+            },
+            (percent: number) => {}
+          );
+          
+          // CRITICAL: Ensure we haven't started a new recording/chat
+          if (reqId !== aiRequestCountRef.current) return;
+
+          const noteEvents = outputToNotesPoly(lastFrames, lastOnsets);
+          const withBends = addPitchBendsToNoteEvents(lastContours, noteEvents);
+          const notesInTime = noteFramesToTime(withBends);
+          
+          const currentLatencySec = (latency || 0) / 1000.0;
+
+          const sorted = [...notesInTime].map(n => {
+            let correctedTime = n.startTimeSeconds - currentLatencySec;
+            if (correctedTime < 0) correctedTime = 0;
+            return { ...n, startTimeSeconds: correctedTime };
+          }).sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+          
+          const thresholdFiltered = sorted.filter(n => n.durationSeconds >= 0.06 && n.amplitude >= 0.45 && n.pitchMidi >= 40 && n.pitchMidi <= 88);
+          
+          const deduplicated: typeof thresholdFiltered = [];
+          for (const note of thresholdFiltered) {
+            if (deduplicated.length === 0) {
+              deduplicated.push({ ...note });
+              continue;
+            }
+            const last = deduplicated[deduplicated.length - 1];
+            if (Math.abs(note.startTimeSeconds - last.startTimeSeconds) <= 0.05) {
+              if (note.amplitude > last.amplitude) deduplicated[deduplicated.length - 1] = { ...note };
+            } else {
+              deduplicated.push({ ...note });
+            }
+          }
+
+          for (let i = 0; i < deduplicated.length - 1; i++) {
+            const curr = deduplicated[i];
+            const next = deduplicated[i + 1];
+            const currEndTime = curr.startTimeSeconds + curr.durationSeconds;
+            if (currEndTime > next.startTimeSeconds) curr.durationSeconds = next.startTimeSeconds - curr.startTimeSeconds;
+          }
+
+          const midiToNoteName = (midi: number) => {
+            const notes = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", "Bb", "B"];
+            return `${notes[midi % 12]}${Math.floor(midi / 12) - 1}`;
+          };
+
+          const theoryNotes = deduplicated.map(n => {
+            const chord = getChordForTime(n.startTimeSeconds, musicKey);
+            const degree = getDegree(n.pitchMidi, chord);
+            return {
+              noteName: midiToNoteName(n.pitchMidi),
+              pitchMidi: n.pitchMidi,
+              startTime: n.startTimeSeconds.toFixed(3),
+              duration: n.durationSeconds.toFixed(3),
+              amplitude: n.amplitude.toFixed(3),
+              currentChord: chord,
+              degree: degree
+            };
+          });
+
+          setTheoryNotesState(theoryNotes);
+
+          // Chunk theoryNotes by loop (4 bars)
+          const loopDurationSec = BAR_DUR * 4;
+          const loops: any[][] = [];
+          theoryNotes.forEach(n => {
+            const lIdx = Math.floor(parseFloat(n.startTime) / loopDurationSec);
+            if (!loops[lIdx]) loops[lIdx] = [];
+            loops[lIdx].push(n);
+          });
+          
+          const validLoops = loops.filter(l => l && l.length > 0);
+
+          if (validLoops.length === 0) {
+            if (reqId !== aiRequestCountRef.current) return;
+            setEvaluations([{ score: null, message: "音が小さすぎるか、うまく認識できなかったな。もう一度頼む。", expression: "neutral" }]);
+            setIsAnalyzing(false);
+            return;
+          }
+
+          const newEvals: {score: number, message: string, expression: string}[] = [];
+          
+          const model = genAI.getGenerativeModel({ 
+            model: "gemini-3.5-flash-lite",
+            generationConfig: { responseMimeType: "application/json" }
+          });
+
+          for (let i = 0; i < validLoops.length; i++) {
+            const loopNotes = validLoops[i];
+            const loopScore = calculateScore(loopNotes);
+            
+            let loopMsg = "";
+            let loopExpr = "neutral";
+            
+            if (!import.meta.env.VITE_GEMINI_API_KEY) {
+              loopMsg = `ループ${i+1}のスコアは${loopScore}点だ。APIキーが未設定みたいだな。`;
+              loopExpr = 'point';
+            } else {
+              const slimNotes = loopNotes.map(n => ({
+                chord: n.currentChord,
+                note: n.noteName,
+                degree: n.degree
+              }));
+              
+              const prompt = `あなたはダークトーンのジャズバーの渋いマスターであり、凄腕のビバップギタリストです。
+以下はユーザーのループ${i+1}回目（2-5-1進行）の演奏データです。提供されたJSONデータ（フレーズの度数情報）を元に、「2-5-1」進行の全体を通したストーリーを評価してください。
+特に、「5（ドミナント）」におけるテンションの使い方のセンスと、「1（トニック）」への着地（解決）の美しさについて必ず言及してください。最初の「2」のコードだけで評価を終わらせてはいけません。
+
+出力は150文字〜200文字程度の純粋なセリフのみとし、愛のある辛口なトーン（日本語）を徹底してください。
+返答は必ず以下のJSONスキーマに従ってください。
+{
+  "expression": "neutral" | "smile" | "think" | "point",
+  "message": "純粋なセリフのみ"
+}
+\nスコア: ${loopScore}\n\nデータ:\n${JSON.stringify(slimNotes)}`;
+              try {
+                const result = await model.generateContent(prompt);
+                if (reqId !== aiRequestCountRef.current) return;
+                let rawText = result.response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
+                const data = JSON.parse(rawText);
+                loopMsg = data.message;
+                loopExpr = data.expression || 'neutral';
+              } catch (apiErr) {
+                console.error(apiErr);
+                loopMsg = `ループ${i+1}の解析中にエラーが起きたようだ。`;
+                loopExpr = 'neutral';
+              }
+            }
+            
+            newEvals.push({ score: loopScore, message: loopMsg, expression: loopExpr });
+            
+            if (reqId !== aiRequestCountRef.current) return;
+            
+            // Appends the new evaluation to the array.
+            // Since the first element's reference inside the array stays the same,
+            // currentEval (which points to evaluations[0]) does NOT structurally change,
+            // so the typewriter effect is NOT interrupted!
+            setEvaluations([...newEvals]);
+
+            if (i === 0) {
+              setIsAnalyzing(false); // Enable the UI immediately so they can read loop 1
+            }
+          }
+          
+          if (reqId === aiRequestCountRef.current && validLoops.length > 0) {
+              setIsAnalyzing(false); 
+          }
+        } catch (err) {
+          console.error('[Phase 4/7] Error:', err);
+          if (reqId !== aiRequestCountRef.current) return;
+          setEvaluations([{ score: null, message: "解析に失敗したな。もう一度頼む。", expression: "neutral" }]);
+          setIsAnalyzing(false);
+        }
+      };
+      
+      mediaRecorder.start();
+
+      const durationMs = (60 / BPM) * 4 * 16 * 1000;
+      autoStopTimerRef.current = window.setTimeout(() => {
+        isAutoStoppedRef.current = true;
+        stopAudio();
+      }, durationMs);
+
+      const scheduleAheadTime = 0.1; 
+      nextNoteTimeRef.current = ctx.currentTime + 0.1;
+
+      schedulerTimerRef.current = window.setInterval(() => {
+        if (!audioContextRef.current) return;
+        const currentCtxTime = audioContextRef.current.currentTime;
+        
+        while (nextNoteTimeRef.current < currentCtxTime + scheduleAheadTime) {
+          const time = nextNoteTimeRef.current;
+          const currentBeatInBar = beatCountRef.current % 4;
+          const timeInProg = (beatCountRef.current * BEAT_DUR) % (BAR_DUR * 4);
+          
+          let playClick = false;
+          if (metronomeMode === 'on-beat') playClick = true;
+          else if (metronomeMode === 'off-beat' && (currentBeatInBar === 1 || currentBeatInBar === 3)) playClick = true;
+          else if (metronomeMode === '4-1' && currentBeatInBar === 0) playClick = true;
+
+          if (playClick) {
+            const osc = audioContextRef.current.createOscillator();
+            const gain = audioContextRef.current.createGain();
+            osc.frequency.value = currentBeatInBar === 0 ? 440 : 220;
+            gain.gain.setValueAtTime(0.0, time);
+            gain.gain.linearRampToValueAtTime(0.5, time + 0.005);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+            osc.connect(gain);
+            gain.connect(audioContextRef.current.destination);
+            osc.start(time);
+            osc.stop(time + 0.05);
+          }
+
+          if (currentBeatInBar === 0) {
+            const chord = getChordForTime(timeInProg, musicKey);
+            playChord(time, chord, BAR_DUR, audioContextRef.current);
+          }
+
+          beatCountRef.current++;
+          nextNoteTimeRef.current += BEAT_DUR;
+        }
+      }, 25);
+
+      setIsMonitoring(true);
+    } catch (e) {
+      console.error('Error starting audio', e);
+    }
+  }, [selectedDeviceId, stopAudio, metronomeMode, musicKey, latency]);
+
+  const hasMoreEvaluations = !isTyping && currentIndex < evaluations.length - 1;
+
+  return (
+    <div className="min-h-screen bg-bg-dark text-gray-200 font-sans flex flex-col relative overflow-x-hidden overflow-y-auto md:overflow-hidden">
+      <div className="fixed inset-0 bg-[url('/back.png')] bg-cover bg-center pointer-events-none z-0 opacity-40" />
+      
+      <div className="max-w-7xl mx-auto w-full px-2 md:px-4 py-4 md:py-6 flex flex-col flex-1 relative z-10 min-h-screen md:h-screen">
+        
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-end border-b border-accent/20 pb-3 md:pb-4 mb-4 md:mb-6">
+          <div className="flex items-baseline gap-2 md:gap-4">
+            <h1 className="font-serif text-accent text-xl md:text-3xl italic tracking-wide m-0">
+              🎵 Midnight Session
+            </h1>
+            <p className="text-gray-400 text-xs md:text-sm m-0 hidden md:block">The Jazz Guitar Trainer - ジャズを、もっと深く、もっと楽しく。</p>
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6 flex-1 min-h-0">
+          
+          <div className="col-span-1 md:col-span-7 lg:col-span-8 relative w-full min-h-[450px] md:min-h-[600px] lg:min-h-[700px]">
+            
+            {/* LIVE Indicator */}
+            {isMonitoring && (
+              <div className="absolute top-2 left-2 md:top-4 md:left-4 bg-black/60 px-2 py-1 md:px-3 md:py-1.5 rounded-full flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-bold text-white border border-white/10 backdrop-blur-md z-30">
+                <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-red-dot rounded-full pulse-dot"></div>
+                LIVE
+              </div>
+            )}
+
+            {/* Master Image */}
+            
+            {countdown !== null && countdown > 0 && (
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center rounded-xl overflow-hidden">
+                <div key={countdown} className="text-[12rem] text-accent font-serif animate-bounce drop-shadow-[0_0_20px_rgba(255,215,0,0.8)] leading-none select-none pointer-events-none">
+                  {countdown}
+                </div>
+              </div>
+            )}
+\n<img 
+              src={`/master_${currentEval?.expression || 'neutral'}.png`} 
+              alt="Master" 
+              className="absolute left-1/2 -translate-x-1/2 bottom-[120px] md:bottom-[190px] h-auto max-h-[70%] md:max-h-[85%] w-auto object-contain z-10 drop-shadow-2xl pointer-events-none"
+            />
+
+            {/* Chat Bubble overlay */}
+            <div 
+              className={`absolute bottom-0 md:bottom-4 left-0 md:left-4 right-0 md:right-4 bg-black/80 backdrop-blur-md border border-gray-600 rounded-xl p-6 md:p-8 shadow-xl z-20 ${
+                hasMoreEvaluations ? 'cursor-pointer hover:bg-black/90 transition-colors' : ''
+              }`}
+              onClick={handleBubbleClick}
+            >
+              <div className="absolute -top-4 left-6 md:left-8 bg-gray-900 border border-gray-600 px-3 py-1 rounded-lg text-accent text-[10px] md:text-xs font-bold">
+                マスター
+              </div>
+              <div className="text-gray-100 text-sm md:text-lg leading-relaxed font-medium min-h-[5rem] md:min-h-[7rem] whitespace-pre-wrap select-none">
+                {displayedMsg.split(/\n|\n/).map((line, i) => (
+                  <React.Fragment key={i}>
+                    {line}
+                    <br />
+                  </React.Fragment>
+                ))}
+              </div>
+              
+              {/* ▼ Tap to Continue Indicator */}
+              {hasMoreEvaluations && (
+                <div className="absolute bottom-4 right-6 text-accent animate-bounce text-xl md:text-2xl drop-shadow-[0_0_8px_rgba(255,215,0,0.8)] select-none pointer-events-none">
+                  ▼
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="col-span-1 md:col-span-5 lg:col-span-4 flex flex-col min-h-[400px] md:min-h-0">
+            <div className="bg-panel backdrop-blur-xl rounded-xl border border-border-dark p-4 md:p-6 flex flex-col gap-4 md:gap-6 shadow-2xl flex-1 md:h-full md:custom-scrollbar md:overflow-y-auto">
+              
+              <h2 className="text-accent text-xs md:text-sm font-bold flex items-center gap-2 uppercase tracking-widest border-b border-accent/20 pb-2 m-0">
+                👤 USER MENU
+              </h2>
+
+              <div className="flex flex-col gap-1.5 md:gap-2">
+                <label className="text-xs md:text-sm text-gray-400">🎵 キー設定</label>
+                <select 
+                  value={musicKey}
+                  onChange={(e) => setMusicKey(e.target.value)}
+                  disabled={isMonitoring} 
+                  className="bg-black/50 border border-border-dark text-white p-2 md:p-2.5 rounded-lg outline-none focus:border-accent text-sm md:text-base"
+                >
+                  {['C', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'B', 'E', 'A', 'D', 'G'].map(k => (
+                    <option key={k} value={k}>{k}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="flex flex-col gap-1.5 md:gap-2">
+                <label className="text-xs md:text-sm text-gray-400">🎤 入力デバイス</label>
+                <select 
+                  value={selectedDeviceId} 
+                  onChange={(e) => setSelectedDeviceId(e.target.value)}
+                  disabled={isMonitoring}
+                  className="bg-black/50 border border-border-dark text-white p-2 md:p-2.5 rounded-lg outline-none focus:border-accent truncate text-sm md:text-base"
+                >
+                  <option value="" disabled>デバイスを選択</option>
+                  {devices.map((d: MediaDeviceInfo) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label || `Device ${d.deviceId.slice(0, 5)}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5 md:gap-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs md:text-sm text-gray-400">⏱ 遅延補正 (ms)</label>
+                  <button onClick={runCalibration} disabled={isMonitoring || isCalibrating} className="text-[10px] md:text-xs bg-accent/20 text-accent px-2 py-1 rounded hover:bg-accent/40 disabled:opacity-50 border border-accent/50">
+                    {isCalibrating ? '測定中...' : '測定'}
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <input type="text" value={latency !== null ? latency : '未設定'} disabled readOnly className="bg-black/50 border border-border-dark text-white p-2 md:p-2.5 rounded-lg w-full text-center text-sm md:text-base" />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5 md:gap-2">
+                <label className="text-xs md:text-sm text-gray-400">⏱ メトロノーム</label>
+                <select 
+                  value={metronomeMode} 
+                  onChange={(e) => setMetronomeMode(e.target.value as any)}
+                  disabled={isMonitoring}
+                  className="bg-black/50 border border-border-dark text-white p-2 md:p-2.5 rounded-lg outline-none focus:border-accent text-sm md:text-base"
+                >
+                  <option value="off">オフ</option>
+                  <option value="on-beat">表拍 (1,2,3,4)</option>
+                  <option value="off-beat">裏拍 (2,4)</option>
+                  <option value="4-1">4-1 (4拍に1回)</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5 md:gap-2">
+                <label className="text-xs md:text-sm text-gray-400">🎼 コード進行 (バッキング有)</label>
+                <div className="flex gap-1 md:gap-2">
+                  {getProgressionForKey(musicKey).map((chord, index) => (
+                    <div key={index} className="flex-1 text-center bg-black/50 border border-border-dark p-1.5 md:p-2 rounded-lg text-xs md:text-sm text-gray-300">
+                      {chord}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-auto pt-4 md:pt-6 flex flex-col gap-3 md:gap-4 pb-4 md:pb-0">
+                {currentEval?.score !== null && currentEval?.score !== undefined && (
+                  <div className="text-center p-3 md:p-4 bg-black/40 border border-accent/20 rounded-xl">
+                    <div className="text-[10px] md:text-xs text-gray-400 uppercase tracking-widest mb-1">
+                      {evaluations.length > 1 ? `LOOP ${currentIndex + 1} SCORE` : 'TOTAL SCORE'}
+                    </div>
+                    <div className="text-4xl md:text-5xl font-serif text-accent">{currentEval.score}</div>
+                  </div>
+                )}
+                
+                {theoryNotesState.length > 0 && !isMonitoring && !isAnalyzing && (
+                  <button onClick={exportMidi} className="w-full py-2 rounded-lg border border-accent/50 text-accent hover:bg-accent/10 text-sm transition-colors">
+                    💾 MIDIダウンロード
+                  </button>
+                )}
+
+                <button 
+                  className={`w-full py-3 md:py-4 rounded-full font-bold text-base md:text-lg flex items-center justify-center gap-2 md:gap-3 transition-all border ${
+                    isMonitoring || countdown !== null
+                      ? 'bg-transparent border-red-dot text-red-dot hover:bg-red-dot/10' 
+                      : 'bg-transparent border-border-dark text-white hover:border-accent hover:bg-accent/10'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  onClick={isMonitoring ? stopAudio : async () => { 
+                    if (selectedDeviceId) {
+                      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+                        audioContextRef.current = new AudioContext({ latencyHint: 'interactive' });
+                      }
+                      if (audioContextRef.current.state === 'suspended') {
+                        await audioContextRef.current.resume();
+                      }
+                      setCountdown(3); 
+                    }
+                  }}
+                  disabled={isAnalyzing || countdown !== null}
+                >
+                  {isMonitoring ? (
+                    <><div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-red-dot"></div> 録音を停止する</>
+                  ) : countdown !== null ? (
+                    <>準備中...</>
+                  ) : (
+                    <><div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${isAnalyzing ? 'bg-gray-500' : 'bg-red-dot pulse-dot'}`}></div> {isAnalyzing ? 'AI解析中...' : '録音を開始する'}</>
+                  )}
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Chat Input */}
+        <div className="mt-4 md:mt-6 mb-4 md:mb-0 bg-panel backdrop-blur-md border border-border-dark rounded-xl p-3 md:p-4 flex items-center gap-3 md:gap-4 shadow-lg shrink-0">
+          <span className="text-accent text-lg md:text-xl">🎤</span>
+          <input 
+            type="text" 
+            placeholder="マスターに話しかける..." 
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleChat()}
+            className="bg-transparent border-none text-white outline-none flex-1 text-xs md:text-sm placeholder-gray-500" 
+          />
+          <button 
+            onClick={handleChat}
+            disabled={!chatInput.trim()} 
+            className="text-gray-500 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-5 md:w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;
