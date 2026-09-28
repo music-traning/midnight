@@ -747,7 +747,7 @@ function App() {
     <div className="min-h-[100dvh] h-auto md:h-[100dvh] bg-bg-dark text-gray-200 font-sans flex flex-col relative overflow-x-hidden overflow-y-auto md:overflow-hidden">
       <div className="fixed inset-0 bg-[url('/back.png')] bg-cover bg-center pointer-events-none z-0 opacity-40" />
       
-      <div className="max-w-7xl mx-auto w-full px-2 md:px-4 py-2 md:py-4 flex flex-col flex-1 relative z-10 h-auto md:h-full">
+      <main className="max-w-7xl mx-auto w-full px-2 md:px-4 py-2 md:py-4 flex flex-col flex-1 relative z-10 h-auto md:h-full">
         
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end border-b border-accent/20 pb-2 mb-2 md:pb-3 md:mb-3 shrink-0 relative">
           <div className="flex items-baseline gap-2 md:gap-4">
@@ -847,8 +847,8 @@ function App() {
               </h2>
 
               <div className="flex flex-col gap-1 md:gap-1.5">
-                <label className="text-[10px] md:text-xs text-gray-400">{T.keySetting}</label>
-                <select 
+                <label htmlFor="key-select" className="text-[10px] md:text-xs text-gray-400">{T.keySetting}</label>
+                <select id="key-select"
                   value={musicKey}
                   onChange={(e) => setMusicKey(e.target.value)}
                   disabled={isMonitoring} 
@@ -861,8 +861,8 @@ function App() {
               </div>
               
               <div className="flex flex-col gap-1 md:gap-1.5">
-                <label className="text-[10px] md:text-xs text-gray-400">{T.inputDevice}</label>
-                <select 
+                <label htmlFor="device-select" className="text-[10px] md:text-xs text-gray-400">{T.inputDevice}</label>
+                <select id="device-select"
                   value={selectedDeviceId} 
                   onChange={(e) => setSelectedDeviceId(e.target.value)}
                   disabled={isMonitoring}
@@ -879,19 +879,19 @@ function App() {
 
               <div className="flex flex-col gap-1 md:gap-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] md:text-xs text-gray-400">{T.latencyCalib}</label>
+                  <label htmlFor="latency-input" className="text-[10px] md:text-xs text-gray-400">{T.latencyCalib}</label>
                   <button onClick={runCalibration} disabled={isMonitoring || isCalibrating} className="text-[9px] md:text-[10px] bg-accent/20 text-accent px-2 py-0.5 rounded hover:bg-accent/40 disabled:opacity-50 border border-accent/50">
                     {isCalibrating ? `測定中... (${calibrationStep}/4)` : '測定'}
                   </button>
                 </div>
                 <div className="flex gap-2">
-                  <input type="text" value={latency !== null ? latency : '未設定'} disabled readOnly className="bg-black/50 border border-border-dark text-white p-1.5 md:p-2 rounded-lg w-full text-center text-xs md:text-sm" />
+                  <input id="latency-input" type="text" value={latency !== null ? latency : '未設定'} disabled readOnly className="bg-black/50 border border-border-dark text-white p-1.5 md:p-2 rounded-lg w-full text-center text-xs md:text-sm" />
                 </div>
               </div>
 
               <div className="flex flex-col gap-1 md:gap-1.5">
-                <label className="text-[10px] md:text-xs text-gray-400">{T.metronome}</label>
-                <select 
+                <label htmlFor="metronome-select" className="text-[10px] md:text-xs text-gray-400">{T.metronome}</label>
+                <select id="metronome-select"
                   value={metronomeMode} 
                   onChange={(e) => setMetronomeMode(e.target.value as any)}
                   disabled={isMonitoring}
@@ -995,6 +995,7 @@ function App() {
         </footer>
       </div>
 
+      </main>
       {/* Help Modal */}
       {isHelpOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1003,6 +1004,7 @@ function App() {
             <button 
               onClick={() => setIsHelpOpen(false)}
               className="absolute top-4 right-4 text-gray-500 hover:text-accent transition-colors"
+              aria-label="ヘルプを閉じる"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
