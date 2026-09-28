@@ -604,7 +604,7 @@ function App() {
               setEvaluations(finalEvals);
             }
           } catch (apiErr) {
-            console.error(apiErr);
+            console.error("[Front-end Error Details]:", apiErr);
             if (reqId !== aiRequestCountRef.current) return;
             const fallbackEvals = allLoopsData.map(d => ({
               score: d.score,
@@ -620,7 +620,7 @@ function App() {
 
           setIsAnalyzing(false);
         } catch (err) {
-          console.error('[Phase 4/7] Error:', err);
+          console.error("[Front-end Error Details]:", err);
           if (reqId !== aiRequestCountRef.current) return;
           setEvaluations([{ score: null, message: T.evalError, expression: "neutral" }]);
           setIsAnalyzing(false);
