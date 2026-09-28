@@ -1,56 +1,88 @@
 import { describe, it, expect } from 'vitest';
-import { getProgressionForKey, getChordForTime, getDegree, calculateScore, BPM, BEAT_DUR, BAR_DUR } from './theory';
+import { getProgressionForKey, getChordForTime, getDegree, calculateScore, analyzeNote, getNoteCategory, BPM, BEAT_DUR, BAR_DUR } from './theory';
 
-describe('theory', () => {
+describe('theory logic', () => {
   it('getProgressionForKey', () => {
     expect(getProgressionForKey('C')).toEqual(['Dm7', 'G7', 'Cmaj7']);
     expect(getProgressionForKey('F')).toEqual(['Gm7', 'C7', 'Fmaj7']);
-    // Fallback
     expect(getProgressionForKey('Unknown')).toEqual(['Dm7', 'G7', 'Cmaj7']);
   });
 
   it('getChordForTime', () => {
-    // BAR_DUR for 120 BPM is 2.0s
     expect(getChordForTime(0, 'C')).toBe('Dm7');
     expect(getChordForTime(1.9, 'C')).toBe('Dm7');
     expect(getChordForTime(2.0, 'C')).toBe('G7');
     expect(getChordForTime(3.9, 'C')).toBe('G7');
     expect(getChordForTime(4.0, 'C')).toBe('Cmaj7');
     expect(getChordForTime(5.9, 'C')).toBe('Cmaj7');
-    // loops at 8.0 (BAR_DUR * 4)
     expect(getChordForTime(8.0, 'C')).toBe('Dm7');
   });
 
   it('getDegree', () => {
-    // C = 0
     expect(getDegree(0, 'Cmaj7')).toBe('1');
     expect(getDegree(4, 'Cmaj7')).toBe('3');
     expect(getDegree(7, 'Cmaj7')).toBe('5');
-    // Dm7 root = D (2)
-    // Note F (5) => 5 - 2 = 3 => 'b3'
     expect(getDegree(5, 'Dm7')).toBe('b3');
-    // Unknown root
     expect(getDegree(0, 'Unknown')).toBe('?');
   });
 
-  it('calculateScore', () => {
+  it('getNoteCategory', () => {
+    // m7
+    expect(getNoteCategory('Dm7', '1')).toBe('CT');
+    expect(getNoteCategory('Dm7', 'b3')).toBe('CT');
+    expect(getNoteCategory('Dm7', '11')).toBe('TENSION');
+    expect(getNoteCategory('Dm7', 'b13')).toBe('AVOID');
+    expect(getNoteCategory('Dm7', 'M7')).toBe('OUT');
+
+    // 7
+    expect(getNoteCategory('G7', '3')).toBe('CT');
+    expect(getNoteCategory('G7', '13')).toBe('TENSION');
+    expect(getNoteCategory('G7', 'b9')).toBe('TENSION');
+    expect(getNoteCategory('G7', '11')).toBe('AVOID');
+    expect(getNoteCategory('G7', 'M7')).toBe('OUT');
+
+    // maj7
+    expect(getNoteCategory('Cmaj7', 'M7')).toBe('CT');
+    expect(getNoteCategory('Cmaj7', '9')).toBe('TENSION');
+    expect(getNoteCategory('Cmaj7', '11')).toBe('AVOID');
+    expect(getNoteCategory('Cmaj7', 'b7')).toBe('OUT');
+  });
+
+  it('analyzeNote enrich properties correctly', () => {
+    const note = {
+      startTime: '0.0', // Beat 0
+      duration: '0.5',
+      currentChord: 'Dm7',
+      degree: '1'
+    };
+    
+    const analyzed = analyzeNote(note);
+    expect(analyzed.barNumber).toBe(1);
+    expect(analyzed.beatPosition).toBe(0);
+    expect(analyzed.category).toBe('CT');
+    expect(analyzed.isOnGrid).toBe(true);
+    expect(analyzed.rScore).toBe(1);
+    expect(analyzed.theoryScore).toBe(1.0);
+  });
+
+  it('calculateScore calculates totals and handles density penalty', () => {
     expect(calculateScore([])).toBe(0);
 
-    // Perfect timing (diff = 0 -> rScore = 1) and perfect degree ('1' -> tScore = 1)
-    const notes = [
-      { startTime: '0.0', degree: '1' },
-      { startTime: '0.5', degree: '3' }, // BEAT_DUR is 0.5
-    ];
-    // rScore = 1 * 2 = 2. rFinal = 2/2 * 40 = 40
-    // tScore = 1 * 2 = 2. tFinal = 2/2 * 60 = 60
-    expect(calculateScore(notes)).toBe(100);
+    const manyNotes = Array.from({ length: 8 }).map((_, i) => ({
+      startTime: (i * 0.5).toString(),
+      duration: '0.2',
+      currentChord: 'Cmaj7',
+      degree: '1' // CT
+    }));
 
-    // Bad timing, bad degree
-    const badNotes = [
-      { startTime: '0.25', degree: '?' } // halfway between beats (max diff 0.25 -> rScore 0)
+    // 8 notes => densityRatio = 1.0. All perfect grid, all CT.
+    expect(calculateScore(manyNotes)).toBe(100);
+
+    const fewNotes = [
+      { startTime: '0.0', duration: '0.2', currentChord: 'Cmaj7', degree: '1' }
     ];
-    // rScore = 0. rFinal = 0/1 * 40 = 0
-    // tScore = 0.3. tFinal = Math.round(0.3 / 1 * 60) = 18
-    expect(calculateScore(badNotes)).toBe(18);
+    // 1 note => densityRatio = 1/8.
+    // Score would be 100, but with density it is 100 * (1/8) = 12.5 -> 13
+    expect(calculateScore(fewNotes)).toBe(13);
   });
 });

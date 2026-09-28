@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { UI_TEXT } from './i18n';
 import './App.css';
 import MidiWriter from 'midi-writer-js';
-import { BPM, BEAT_DUR, BAR_DUR, getProgressionForKey, getChordForTime, getDegree, calculateScore } from './lib/theory';
+import { BPM, BEAT_DUR, BAR_DUR, getProgressionForKey, getChordForTime, getDegree, calculateScore, analyzeNote } from './lib/theory';
 
 function playChord(time: number, chordName: string, duration: number, ctx: AudioContext, destination?: AudioNode) {
   const midiToFreq = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
