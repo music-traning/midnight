@@ -347,7 +347,7 @@ function App() {
           osc.start(ctx.currentTime);
           osc.stop(ctx.currentTime + 0.05);
 
-          const data = new Float32Array(analyser.fftSize);
+          const data = new Float32Array((analyser as AnalyserNode).fftSize);
 
           const check = () => {
             if (!analyser) return;
