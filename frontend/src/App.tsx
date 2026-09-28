@@ -993,8 +993,6 @@ function App() {
             {T.footerCopyright}
           </a>
         </footer>
-      </div>
-
       </main>
       {/* Help Modal */}
       {isHelpOpen && (
