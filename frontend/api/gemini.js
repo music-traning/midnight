@@ -7,19 +7,18 @@ export default async function handler(req, res) {
   }
 
   const { type, payload, language = "ja" } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  if (!apiKey) {
-    return res.status(500).json({ error: 'API key not configured on server' });
-  }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.5-flash-lite",
-    generationConfig: { responseMimeType: "application/json" }
-  });
-
   try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("APIキーが設定されていません");
+    }
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-3.5-flash-lite",
+      generationConfig: { responseMimeType: "application/json" }
+    });
+
     let prompt = '';
     
     if (type === 'chat') {
