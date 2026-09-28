@@ -30,6 +30,10 @@ export const UI_TEXT = {
     
     // Messages
     initialMessage: "よし、いい感じだ。\nまずは今日のフレーズを聴かせてくれ。\nどんな感じで弾くか、楽しみにしているよ。",
+    recordingStart: "聴いてるぜ。思い切り弾いてみな。",
+    autoStopMsg: "もうやめときな。今日はそのくらいにしておけ。\n指が擦り切れるぜ。",
+    analyzingMsg: (count: number) => `AI解析中だ。少し待ってな...\n（抽出された総ノート数: ${count}）`,
+    audioQuietMsg: "音が小さすぎるか、うまく認識できなかったな。もう一度頼む。",
     chatError: "すまん、ちょっと聞き取れなかった。もう一度言ってくれないか？",
     evalError: "解析に失敗したな。もう一度頼む。",
     evalLoopError: (n: number) => `${n}周目の解析中にエラーが起きたようだ。`,
@@ -79,6 +83,10 @@ export const UI_TEXT = {
     
     // Messages
     initialMessage: "Alright, the vibe is perfect.\nLet's hear what you've got tonight.\nShow me your soul.",
+    recordingStart: "I'm listening. Play it like you mean it.",
+    autoStopMsg: "That's enough for tonight. Take a break before your fingers bleed.",
+    analyzingMsg: (count: number) => `Give me a second to process that...\n(Notes extracted: ${count})`,
+    audioQuietMsg: "Too quiet, or the vibe didn't come through. Play it again.",
     chatError: "Sorry, I couldn't quite catch that over the music. Mind saying it again?",
     evalError: "The vibe got lost in the noise. Play it for me one more time.",
     evalLoopError: (n: number) => `Lost the groove on loop ${n}. Let's try again.`,

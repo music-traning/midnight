@@ -61,7 +61,9 @@ ${JSON.stringify(payload)}
     }
 
     
-    const langRule = "\n\n[IMPORTANT] If the user selected language is 'en', you MUST output all text in the 'message' field in natural, cool native English like a cinematic Jazz bar master. If 'ja', output in Japanese.\nUser selected language: " + language;
+    const langRule = language === 'en'
+      ? "\n\n**CRITICAL INSTRUCTION: You MUST output your entire response in English. Use cool, natural Jazz slang and native English phrasing.**"
+      : "\n\n**CRITICAL INSTRUCTION: 日本語で出力してください。**";
     prompt += langRule;
     
     const result = await model.generateContent(prompt);

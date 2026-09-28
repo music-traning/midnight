@@ -113,7 +113,7 @@ function playCountSound(ctx: AudioContext, isHigh: boolean) {
 }
 
 function App() {
-  const [language, setLanguage] = useState<'ja' | 'en'>('ja');
+  const [language, setLanguage] = useState<'ja' | 'en'>(() => (localStorage.getItem('app_language') as 'ja' | 'en') || 'ja');
   const T = UI_TEXT[language];
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
@@ -172,6 +172,16 @@ function App() {
       startAudio();
     }
   }, [countdown]);
+
+  
+  useEffect(() => {
+    setEvaluations(prev => {
+      if (prev.length === 1 && (prev[0].message === UI_TEXT.ja.initialMessage || prev[0].message === UI_TEXT.en.initialMessage)) {
+        return [{ ...prev[0], message: T.initialMessage }];
+      }
+      return prev;
+    });
+  }, [language]);
 
   const currentEval = evaluations[currentIndex];
 
@@ -439,7 +449,7 @@ function App() {
     stopAudio();
     
     // Clear and prepare state
-    setEvaluations([{ score: null, message: "聴いてるぜ。思い切り弾いてみな。", expression: "neutral" }]);
+    setEvaluations([{ score: null, message: T.recordingStart, expression: "neutral" }]);
     setCurrentIndex(0);
     setTheoryNotesState([]);
     beatCountRef.current = 0;
@@ -593,7 +603,7 @@ function App() {
 
           if (validLoops.length === 0) {
             if (reqId !== aiRequestCountRef.current) return;
-            const emptyMsg = { score: null, message: "音が小さすぎるか、うまく認識できなかったな。もう一度頼む。", expression: "neutral" };
+            const emptyMsg = { score: null, message: T.audioQuietMsg, expression: "neutral" };
             if (wasAutoStopped) {
               setEvaluations(prev => [prev[0], emptyMsg]);
             } else {
@@ -749,7 +759,11 @@ function App() {
           
           <div className="absolute right-0 top-0 md:relative flex items-center gap-3 md:gap-4">
             <button 
-              onClick={() => setLanguage(lang => lang === 'ja' ? 'en' : 'ja')}
+              onClick={() => setLanguage(prev => {
+                const newLang = prev === 'ja' ? 'en' : 'ja';
+                localStorage.setItem('app_language', newLang);
+                return newLang;
+              })}
               className="text-[10px] md:text-xs font-bold px-2 py-1 border border-gray-600 rounded text-gray-400 hover:text-accent hover:border-accent transition-colors"
             >
               {language === 'ja' ? 'EN / JA' : 'JA / EN'}
