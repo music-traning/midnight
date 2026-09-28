@@ -137,7 +137,8 @@ function App() {
     const saved = localStorage.getItem('calibration_latency');
     return saved ? parseInt(saved, 10) : null;
   });
-  const [isCalibrating, setIsCalibrating] = useState(false);
+  const [calibrationStep, setCalibrationStep] = useState(0);
+  const isCalibrating = calibrationStep > 0;
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -294,25 +295,20 @@ function App() {
     if (ctx.state === 'suspended') {
       await ctx.resume();
     }
-    setIsCalibrating(true);
     
     let stream: MediaStream | null = null;
     let source: MediaStreamAudioSourceNode | null = null;
     let analyser: AnalyserNode | null = null;
-    let reqId: number;
-    let timeoutId: any;
-    let detected = false;
 
     const cleanup = () => {
-      if (reqId) cancelAnimationFrame(reqId);
-      if (timeoutId) clearTimeout(timeoutId);
       if (stream) stream.getTracks().forEach(t => t.stop());
       if (source) source.disconnect();
       if (analyser) analyser.disconnect();
-      setIsCalibrating(false);
+      setCalibrationStep(0);
     };
 
     try {
+      setCalibrationStep(1);
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
@@ -327,54 +323,83 @@ function App() {
       analyser.fftSize = 512;
       source.connect(analyser);
 
-      const osc = ctx.createOscillator();
-      const env = ctx.createGain();
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      env.gain.setValueAtTime(0, ctx.currentTime);
-      env.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.005);
-      env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
-      osc.connect(env);
-      env.connect(ctx.destination);
+      const measurements: number[] = [];
 
-      const startPerf = performance.now();
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.05);
-
-      const data = new Float32Array(analyser.fftSize);
-
-      const check = () => {
-        if (!analyser) return;
-        analyser.getFloatTimeDomainData(data);
-        let peak = 0;
-        for (let i = 0; i < data.length; i++) {
-          if (Math.abs(data[i]) > peak) peak = Math.abs(data[i]);
-        }
+      for (let step = 1; step <= 4; step++) {
+        setCalibrationStep(step);
         
-        if (peak > 0.15) {
-          detected = true;
-          const endPerf = performance.now();
-          const diff = Math.round(endPerf - startPerf);
-          setLatency(diff);
-          localStorage.setItem('calibration_latency', diff.toString());
-          cleanup();
-          return;
+        const latencyVal = await new Promise<number>((resolve, reject) => {
+          const osc = ctx.createOscillator();
+          const env = ctx.createGain();
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          env.gain.setValueAtTime(0, ctx.currentTime);
+          env.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.005);
+          env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+          osc.connect(env);
+          env.connect(ctx.destination);
+
+          let reqId: number;
+          let timeoutId: any;
+          let detected = false;
+          
+          const startPerf = performance.now();
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.05);
+
+          const data = new Float32Array(analyser.fftSize);
+
+          const check = () => {
+            if (!analyser) return;
+            analyser.getFloatTimeDomainData(data);
+            let peak = 0;
+            for (let i = 0; i < data.length; i++) {
+              if (Math.abs(data[i]) > peak) peak = Math.abs(data[i]);
+            }
+            
+            if (peak > 0.15) {
+              detected = true;
+              cancelAnimationFrame(reqId);
+              clearTimeout(timeoutId);
+              resolve(Math.round(performance.now() - startPerf));
+              return;
+            }
+            reqId = requestAnimationFrame(check);
+          };
+
+          reqId = requestAnimationFrame(check);
+
+          timeoutId = setTimeout(() => {
+            if (!detected) {
+              cancelAnimationFrame(reqId);
+              reject(new Error('timeout'));
+            }
+          }, 1500);
+        });
+
+        measurements.push(latencyVal);
+
+        if (step < 4) {
+          await new Promise(r => setTimeout(r, 500));
         }
-        reqId = requestAnimationFrame(check);
-      };
+      }
 
-      reqId = requestAnimationFrame(check);
+      // 4回のうち、最大値と最小値を除外して平均をとる（より安定させるため）
+      measurements.sort((a, b) => a - b);
+      const validMeasurements = measurements.slice(1, 3);
+      const avg = Math.round(validMeasurements.reduce((a, b) => a + b, 0) / validMeasurements.length);
 
-      timeoutId = setTimeout(() => {
-        if (!detected) {
-          alert('マイクが測定音を拾えませんでした。スピーカーの音量を確認するか、マイクを近づけて再度お試しください。');
-          cleanup();
-        }
-      }, 1500);
+      setLatency(avg);
+      localStorage.setItem('calibration_latency', avg.toString());
+      cleanup();
 
-    } catch (e) {
-      console.error('Calibration failed to get mic stream', e);
-      alert('マイクへのアクセスに失敗しました。');
+    } catch (e: any) {
+      console.error('Calibration failed', e);
+      if (e.message === 'timeout') {
+        alert('マイクが測定音を拾えませんでした。全体の測定を中止します。');
+      } else {
+        alert('マイクへのアクセスに失敗しました。');
+      }
       cleanup();
     }
   }, [selectedDeviceId]);
@@ -823,7 +848,7 @@ function App() {
                 <div className="flex items-center justify-between">
                   <label className="text-[10px] md:text-xs text-gray-400">⏱ 遅延補正 (ms)</label>
                   <button onClick={runCalibration} disabled={isMonitoring || isCalibrating} className="text-[9px] md:text-[10px] bg-accent/20 text-accent px-2 py-0.5 rounded hover:bg-accent/40 disabled:opacity-50 border border-accent/50">
-                    {isCalibrating ? '測定中...' : '測定'}
+                    {isCalibrating ? `測定中... (${calibrationStep}/4)` : '測定'}
                   </button>
                 </div>
                 <div className="flex gap-2">
