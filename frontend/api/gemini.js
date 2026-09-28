@@ -1,81 +1,165 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+
+const MAX_CHAT_LENGTH = 300;
+const MAX_EVAL_NOTES = 200;
+
+const SYSTEM_PROMPT_JA = `あなたはダークトーンのジャズバーの渋いマスターであり、凄腕のビバップギタリストです。ユーザーからのメッセージに対して、愛のある辛口なトーンで語りかけてください。AI的な不自然な挨拶やリスト形式は避け、純粋なセリフのみを出力してください。`;
+const SYSTEM_PROMPT_EN = `You are the cool, slightly cynical master of a dark-toned jazz bar and an expert bebop guitarist. Speak to the user with tough love and cool jazz slang. Avoid artificial AI greetings or list formats. Output pure dialogue only.`;
+
+const CHAT_RULES_JA = `ユーザーの言葉に対して150文字以内で返答してください。`;
+const CHAT_RULES_EN = `Respond to the user's input in under 150 characters.`;
+
+const EVAL_RULES_JA = `ユーザーが連続して弾いた2-5-1進行のギターソロデータが渡されます。各ループに対して、2, 5, 1それぞれのコードでのプレイを分析した上でセリフを生成してください。
+1. 「analysis_2」「analysis_5」「analysis_1」のフィールドで、それぞれのコードにおいてユーザーが実際に弾いた度数（degree）と判定（category: CT/TENSION/AVOID/OUT）をデータから読み取り、具体的に言及してください。
+2. 渡されたデータに該当コードのノートが存在しない場合は「弾いていない」と厳しく指摘してください。
+3. 最終的な「message」フィールドは、上記3つの結果を統合し、全コードに言及した自然な語り口で、愛のある辛口セリフにしてください。`;
+
+const EVAL_RULES_EN = `You will receive data for a 2-5-1 guitar solo. For each loop, analyze the play for the 2, 5, and 1 chords.
+1. In 'analysis_2', 'analysis_5', 'analysis_1', explicitly mention the degrees played and their categories (CT/TENSION/AVOID/OUT).
+2. If no notes exist for a chord, strictly point out that they didn't play anything.
+3. In 'message', combine these findings into a natural, tough-love dialogue mentioning all chords.`;
 
 export default async function handler(req, res) {
-  console.log("API Key exists?:", !!process.env.GEMINI_API_KEY);
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  if (!req.body || typeof req.body !== 'object') {
+    return res.status(400).json({ error: 'Invalid request body' });
+  }
+
   const { type, payload, language = "ja" } = req.body;
+
+  if (type !== 'chat' && type !== 'evaluate') {
+    return res.status(400).json({ error: 'Invalid type' });
+  }
+
+  // 1. Strict Validation & Sanitization
+  let safePayload;
+  try {
+    if (type === 'chat') {
+      if (typeof payload !== 'string') throw new Error("Chat payload must be string");
+      safePayload = payload.trim();
+      if (safePayload.length === 0 || safePayload.length > MAX_CHAT_LENGTH) {
+        throw new Error(`Chat length must be 1-${MAX_CHAT_LENGTH}`);
+      }
+    } else {
+      if (!Array.isArray(payload) || payload.length === 0 || payload.length > 4) {
+        throw new Error("Eval payload must be array of 1-4 loops");
+      }
+      safePayload = payload.map(p => {
+        if (typeof p.loop !== 'number' || typeof p.score !== 'number' || p.score < 0 || p.score > 100) {
+          throw new Error("Invalid loop or score");
+        }
+        if (!Array.isArray(p.notes) || p.notes.length > MAX_EVAL_NOTES) {
+          throw new Error(`Notes array must be 0-${MAX_EVAL_NOTES}`);
+        }
+        const safeNotes = p.notes.map(n => ({
+          chord: String(n.chord || '').substring(0, 10),
+          note: String(n.note || '').substring(0, 5),
+          degree: String(n.degree || '').substring(0, 10),
+          bar: Number(n.bar) || 0,
+          beat: Number(n.beat) || 0,
+          duration: Number(n.duration) || 0,
+          category: String(n.category || '').substring(0, 10)
+        }));
+        return { loop: p.loop, score: p.score, notes: safeNotes };
+      });
+    }
+  } catch (validationErr) {
+    return res.status(400).json({ error: 'Validation Error', details: validationErr.message });
+  }
+
+  // 2. Setup Gemini AI
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error("APIキーが設定されていません");
+      throw new Error("API key not configured");
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
+
+    const isEn = language === 'en';
+    const basePersona = isEn ? SYSTEM_PROMPT_EN : SYSTEM_PROMPT_JA;
+    const taskRules = type === 'chat' 
+      ? (isEn ? CHAT_RULES_EN : CHAT_RULES_JA) 
+      : (isEn ? EVAL_RULES_EN : EVAL_RULES_JA);
+      
+    const systemInstruction = `${basePersona}\n\n${taskRules}`;
+
+    const chatSchema = {
+       type: SchemaType.OBJECT,
+       properties: {
+         expression: { type: SchemaType.STRING, enum: ['neutral', 'smile', 'think', 'point'] },
+         message: { type: SchemaType.STRING }
+       },
+       required: ['expression', 'message']
+    };
+
+    const evaluateSchema = {
+       type: SchemaType.ARRAY,
+       items: {
+         type: SchemaType.OBJECT,
+         properties: {
+           loop: { type: SchemaType.INTEGER },
+           score: { type: SchemaType.INTEGER },
+           analysis_2: { type: SchemaType.STRING },
+           analysis_5: { type: SchemaType.STRING },
+           analysis_1: { type: SchemaType.STRING },
+           expression: { type: SchemaType.STRING, enum: ['neutral', 'smile', 'think', 'point'] },
+           message: { type: SchemaType.STRING }
+         },
+         required: ['loop', 'score', 'analysis_2', 'analysis_5', 'analysis_1', 'expression', 'message']
+       }
+    };
+
     const model = genAI.getGenerativeModel({
-      model: "gemini-3.5-flash-lite",
-      generationConfig: { responseMimeType: "application/json" }
+      model: "gemini-1.5-flash",
+      systemInstruction,
+      generationConfig: { 
+        responseMimeType: "application/json",
+        responseSchema: type === 'chat' ? chatSchema : evaluateSchema,
+        temperature: 0.7,
+        maxOutputTokens: type === 'chat' ? 200 : 1000
+      }
     });
 
-    let prompt = '';
-    
+    // Generate Content
+    let promptText = "";
     if (type === 'chat') {
-      prompt = `あなたはダークトーンのジャズバーの渋いマスターであり、凄腕のビバップギタリストです。ユーザーからのメッセージに対して、愛のある辛口なトーンで150文字以内で語りかけてください。AI的な不自然な挨拶やリスト形式は避け、純粋なセリフのみを出力してください。
-返答は必ず以下のJSONスキーマに従ってください。
-{
-  "expression": "neutral" | "smile" | "think" | "point",
-  "message": "純粋なセリフのみ"
-}
-
-ユーザーの言葉: ${payload}`;
-    } else if (type === 'evaluate') {
-      prompt = `あなたはダークトーンのジャズバーの渋いマスターであり、凄腕のビバップギタリストです。
-以下はユーザーが連続して弾いた最大4周分（1周=2-5-1進行）のギターソロデータです。
-
-【データ概要】
-ループ数: ${payload.length}
-各ループのデータ:
-${JSON.stringify(payload)}
-
-【指示】
-各ループに対して、JSONスキーマに従い、必ず2, 5, 1それぞれのコードでのプレイを分析した上でセリフを生成してください。
-1. 「analysis_2」「analysis_5」「analysis_1」の各フィールドで、それぞれのコードにおいてユーザーが実際に弾いた度数（degree）をデータから読み取り、絶対に省略せずに言語化してください。
-2. 抽象的なごまかしは許されません。渡されたデータに該当コードのノートが存在しない場合は「弾いていない」と厳しく指摘してください。
-3. 最終的な「message」フィールドは、上記3つの分析結果を統合し、「2のコードでは〜、だが5のコードで〜し、最後の1への着地は〜だった」のように、3つのコードすべてに具体的に言及したセリフにしてください。
-4. 全体の展開（起承転結）を踏まえた自然な語り口で、愛のある辛口なトーン（日本語）を徹底してください。
-
-【出力JSONスキーマ】
-[
-  {
-    "loop": ループ番号,
-    "score": ループのスコア(提供された数値をそのまま返すこと),
-    "analysis_2": "最初の2のコード（例: Dm7）部分で弾かれた度数とアプローチの具体的な分析",
-    "analysis_5": "2番目の5のコード（例: G7）部分でのテンションの有無や具体的なプレイの分析",
-    "analysis_1": "最後の1のコード（例: Cmaj7）部分への解決の美しさの分析",
-    "expression": "neutral" | "smile" | "think" | "point",
-    "message": "上記3つの分析結果（analysis_2, 5, 1）を必ず全て盛り込み、自然に繋ぎ合わせたマスターの愛のある辛口セリフ"
-  }
-]`;
+      promptText = `ユーザーの言葉: ${safePayload}`;
+    } else {
+      promptText = `【データ概要】ループ数: ${safePayload.length}\n【データ】\n${JSON.stringify(safePayload)}`;
     }
 
-    
-    const langRule = language === 'en'
-      ? "\n\n**CRITICAL INSTRUCTION: You MUST output your entire response in English. Use cool, natural Jazz slang and native English phrasing.**"
-      : "\n\n**CRITICAL INSTRUCTION: 日本語で出力してください。**";
-    prompt += langRule;
-    
-    const result = await model.generateContent(prompt);
-    let rawText = result.response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
-    const data = JSON.parse(rawText);
-    
+    const result = await model.generateContent(promptText);
+    let rawText = result.response.text().trim();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch (e) {
+      throw new Error("Invalid JSON response from Gemini");
+    }
+
+    // 3. Output Validation
+    const validExpressions = ['neutral', 'smile', 'think', 'point'];
+    if (type === 'chat') {
+      if (!validExpressions.includes(data.expression)) data.expression = 'neutral';
+      if (data.message && data.message.length > 500) data.message = data.message.substring(0, 500) + '...';
+    } else {
+      if (Array.isArray(data)) {
+        data = data.map(d => {
+          if (!validExpressions.includes(d.expression)) d.expression = 'neutral';
+          if (d.message && d.message.length > 500) d.message = d.message.substring(0, 500) + '...';
+          return d;
+        });
+      }
+    }
+
     return res.status(200).json(data);
+
   } catch (error) {
-    console.error("[API Error Details]:", error);
-    return res.status(200).json({
-      expression: "think",
-      message: `【システムデバッグ】裏側でエラーが起きた。内容: ${error.message} | APIキー存在: ${!!process.env.GEMINI_API_KEY}`
-    });
+    console.error("[API Gateway Error]:", error);
+    return res.status(502).json({ error: 'Upstream processing failed' });
   }
 }
