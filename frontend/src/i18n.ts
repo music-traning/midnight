@@ -16,7 +16,7 @@ export const UI_TEXT = {
     metroOffBeat: "裏拍 (2,4)",
     metro41: "4-1 (4拍に1回)",
     chordProgression: "🎼 コード進行 (バッキング有)",
-    loopScore: (n: number) => \`LOOP \${n} SCORE\`,
+    loopScore: (n: number) => `LOOP ${n} SCORE`,
     totalScore: "TOTAL SCORE",
     midiDownload: "💾 MIDIダウンロード",
     stopRecording: "録音を停止する",
@@ -29,10 +29,10 @@ export const UI_TEXT = {
     liveIndicator: "LIVE",
     
     // Messages
-    initialMessage: "よし、いい感じだ。\\nまずは今日のフレーズを聴かせてくれ。\\nどんな感じで弾くか、楽しみにしているよ。",
+    initialMessage: "よし、いい感じだ。\nまずは今日のフレーズを聴かせてくれ。\nどんな感じで弾くか、楽しみにしているよ。",
     chatError: "すまん、ちょっと聞き取れなかった。もう一度言ってくれないか？",
     evalError: "解析に失敗したな。もう一度頼む。",
-    evalLoopError: (n: number) => \`\${n}周目の解析中にエラーが起きたようだ。\`,
+    evalLoopError: (n: number) => `${n}周目の解析中にエラーが起きたようだ。`,
     calibTimeoutAlert: "マイクが測定音を拾えませんでした。全体の測定を中止します。",
     calibAccessAlert: "マイクへのアクセスに失敗しました。",
     
@@ -65,7 +65,7 @@ export const UI_TEXT = {
     metroOffBeat: "Off-Beat (2,4)",
     metro41: "4-1 (Once per 4 beats)",
     chordProgression: "🎼 CHORDS (w/ Backing)",
-    loopScore: (n: number) => \`LOOP \${n} SCORE\`,
+    loopScore: (n: number) => `LOOP ${n} SCORE`,
     totalScore: "TOTAL SCORE",
     midiDownload: "💾 DOWNLOAD MIDI",
     stopRecording: "Stop Playing",
@@ -78,10 +78,10 @@ export const UI_TEXT = {
     liveIndicator: "LIVE",
     
     // Messages
-    initialMessage: "Alright, the vibe is perfect.\\nLet's hear what you've got tonight.\\nShow me your soul.",
+    initialMessage: "Alright, the vibe is perfect.\nLet's hear what you've got tonight.\nShow me your soul.",
     chatError: "Sorry, I couldn't quite catch that over the music. Mind saying it again?",
     evalError: "The vibe got lost in the noise. Play it for me one more time.",
-    evalLoopError: (n: number) => \`Lost the groove on loop \${n}. Let's try again.\`,
+    evalLoopError: (n: number) => `Lost the groove on loop ${n}. Let's try again.`,
     calibTimeoutAlert: "Couldn't hear the test tone. Calibration aborted.",
     calibAccessAlert: "Failed to access the microphone.",
     
