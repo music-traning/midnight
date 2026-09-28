@@ -74,6 +74,9 @@ ${JSON.stringify(payload)}
     return res.status(200).json(data);
   } catch (error) {
     console.error("[API Error Details]:", error);
-    return res.status(500).json({ error: 'Failed to generate content' });
+    return res.status(200).json({
+      expression: "think",
+      message: `【システムデバッグ】裏側でエラーが起きた。内容: ${error.message} | APIキー存在: ${!!process.env.GEMINI_API_KEY}`
+    });
   }
 }
