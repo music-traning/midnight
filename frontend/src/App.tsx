@@ -489,7 +489,7 @@ function App() {
         const reqId = ++aiRequestCountRef.current;
         setEvaluations([{ 
           score: null, 
-          message: wasAutoStopped ? "もうやめときな。今日はそのくらいにしておけ。……指が擦り切れるぜ。" : "AI解析中だ。少し待ってな...", 
+          message: wasAutoStopped ? T.autoStopMsg : T.analyzingMsg, 
           expression: wasAutoStopped ? "point" : "think" 
         }]);
         setCurrentIndex(0);
