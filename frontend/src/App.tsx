@@ -4,7 +4,7 @@ import './App.css';
 import MidiWriter from 'midi-writer-js';
 import { BPM, BEAT_DUR, BAR_DUR, getProgressionForKey, getChordForTime, getDegree, calculateScore } from './lib/theory';
 
-function playChord(time: number, chordName: string, duration: number, ctx: AudioContext) {
+function playChord(time: number, chordName: string, duration: number, ctx: AudioContext, destination?: AudioNode) {
   const midiToFreq = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
   let notes: number[] = [];
   const rootStr = chordName.replace(/m7|maj7|7/g, ''); 
@@ -30,7 +30,7 @@ function playChord(time: number, chordName: string, duration: number, ctx: Audio
     gain.gain.linearRampToValueAtTime(0.05, time + 0.05);
     gain.gain.exponentialRampToValueAtTime(0.001, time + duration - 0.1);
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(destination || ctx.destination);
     osc.start(time);
     osc.stop(time + duration);
   });
@@ -38,7 +38,7 @@ function playChord(time: number, chordName: string, duration: number, ctx: Audio
 
 
 
-function playCountSound(ctx: AudioContext, isHigh: boolean) {
+function playCountSound(ctx: AudioContext, isHigh: boolean, destination?: AudioNode) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = 'triangle';
@@ -47,7 +47,7 @@ function playCountSound(ctx: AudioContext, isHigh: boolean) {
   gain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.005);
   gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
   osc.connect(gain);
-  gain.connect(ctx.destination);
+    gain.connect(destination || ctx.destination);
   osc.start(ctx.currentTime);
   osc.stop(ctx.currentTime + 0.1);
 }
@@ -82,6 +82,25 @@ function App() {
   const [calibrationStep, setCalibrationStep] = useState(0);
   const isCalibrating = calibrationStep > 0;
 
+  const latestTRef = useRef(T);
+  const latestLangRef = useRef(language);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const recordingDriftRef = useRef<number>(0);
+  
+  useEffect(() => {
+    latestTRef.current = T;
+    latestLangRef.current = language;
+  }, [T, language]);
+  
+  useEffect(() => {
+    return () => {
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+    };
+  }, []);
+
+
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
@@ -101,7 +120,7 @@ function App() {
     if (countdown === null) return;
     
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      playCountSound(audioContextRef.current, countdown <= 1);
+      playCountSound(audioContextRef.current, countdown <= 1, masterGainRef.current || undefined);
     }
 
     if (countdown > 0) {
@@ -207,7 +226,7 @@ function App() {
       if (!response.ok) throw new Error('API Error');
       const data = await response.json();
       if (reqId !== aiRequestCountRef.current) return;
-      setEvaluations([{ score: null, message: data.message, expression: data.expression || 'neutral' }]);
+      setEvaluations([{ score: null, message: data.message, expression: ['neutral', 'smile', 'think', 'point'].includes(data.expression) ? data.expression : 'neutral' }]);
     } catch (e) {
       console.error(e);
       if (reqId !== aiRequestCountRef.current) return;
@@ -348,9 +367,9 @@ function App() {
     } catch (e: any) {
       console.error('Calibration failed', e);
       if (e.message === 'timeout') {
-        alert(T.calibTimeoutAlert);
+        alert(latestTRef.current.calibTimeoutAlert);
       } else {
-        alert(T.calibAccessAlert);
+        alert(latestTRef.current.calibAccessAlert);
       }
       cleanup();
     }
@@ -389,7 +408,7 @@ function App() {
     stopAudio();
     
     // Clear and prepare state
-    setEvaluations([{ score: null, message: T.recordingStart, expression: "neutral" }]);
+    setEvaluations([{ score: null, message: latestTRef.current.recordingStart, expression: "neutral" }]);
     setCurrentIndex(0);
     setTheoryNotesState([]);
     beatCountRef.current = 0;
@@ -429,7 +448,7 @@ function App() {
         const reqId = ++aiRequestCountRef.current;
         setEvaluations([{ 
           score: null, 
-          message: wasAutoStopped ? T.autoStopMsg : T.analyzingMsg, 
+          message: wasAutoStopped ? latestTRef.current.autoStopMsg : latestTRef.current.analyzingMsg, 
           expression: wasAutoStopped ? "point" : "think" 
         }]);
         setCurrentIndex(0);
@@ -480,7 +499,7 @@ function App() {
           const currentLatencySec = (latency || 0) / 1000.0;
 
           const sorted = [...notesInTime].map(n => {
-            let correctedTime = n.startTimeSeconds - currentLatencySec;
+            let correctedTime = n.startTimeSeconds - currentLatencySec - (recordingDriftRef.current || 0);
             if (correctedTime < 0) correctedTime = 0;
             return { ...n, startTimeSeconds: correctedTime };
           }).sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
@@ -543,7 +562,7 @@ function App() {
 
           if (validLoops.length === 0) {
             if (reqId !== aiRequestCountRef.current) return;
-            const emptyMsg = { score: null, message: T.audioQuietMsg, expression: "neutral" };
+            const emptyMsg = { score: null, message: latestTRef.current.audioQuietMsg, expression: "neutral" };
             if (wasAutoStopped) {
               setEvaluations(prev => [prev[0], emptyMsg]);
             } else {
@@ -581,7 +600,7 @@ function App() {
             const response = await fetch('/api/gemini', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ type: 'evaluate', payload: allLoopsData, language })
+              body: JSON.stringify({ type: 'evaluate', payload: allLoopsData, language: latestLangRef.current })
             });
             if (!response.ok) throw new Error('API Error');
             const dataArray = await response.json();
@@ -594,7 +613,7 @@ function App() {
               return {
                 score: d.score,
                 message: resObj.message || `${i+1}周目も悪くないぜ。`,
-                expression: resObj.expression || 'neutral'
+                expression: ['neutral', 'smile', 'think', 'point'].includes(resObj.expression) ? resObj.expression : 'neutral'
               };
             });
             
@@ -608,7 +627,7 @@ function App() {
             if (reqId !== aiRequestCountRef.current) return;
             const fallbackEvals = allLoopsData.map(d => ({
               score: d.score,
-              message: T.evalLoopError(d.loop),
+              message: latestTRef.current.evalLoopError(d.loop),
               expression: 'neutral'
             }));
             if (wasAutoStopped) {
@@ -628,6 +647,7 @@ function App() {
       };
       
       mediaRecorder.start();
+      recordingDriftRef.current = Math.max(0, nextNoteTimeRef.current - ctx.currentTime);
 
       const durationMs = (60 / BPM) * 4 * 16 * 1000;
       autoStopTimerRef.current = window.setTimeout(() => {
@@ -660,14 +680,14 @@ function App() {
             gain.gain.linearRampToValueAtTime(0.5, time + 0.005);
             gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
             osc.connect(gain);
-            gain.connect(audioContextRef.current.destination);
+            gain.connect(masterGainRef.current || audioContextRef.current.destination);
             osc.start(time);
             osc.stop(time + 0.05);
           }
 
           if (currentBeatInBar === 0) {
             const chord = getChordForTime(timeInProg, musicKey);
-            playChord(time, chord, BAR_DUR, audioContextRef.current);
+            playChord(time, chord, BAR_DUR, audioContextRef.current, masterGainRef.current || undefined);
           }
 
           beatCountRef.current++;
@@ -679,7 +699,7 @@ function App() {
     } catch (e) {
       console.error('Error starting audio', e);
     }
-  }, [selectedDeviceId, stopAudio, metronomeMode, musicKey, latency]);
+  }, [selectedDeviceId, stopAudio, metronomeMode, musicKey, latency]); // Removed language/T dependencies
 
   const hasMoreEvaluations = !isTyping && currentIndex < evaluations.length - 1;
 
