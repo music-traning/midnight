@@ -61,6 +61,25 @@ function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+
+  const helpCloseBtnRef = useRef<HTMLButtonElement>(null);
+  
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isHelpOpen) {
+        setIsHelpOpen(false);
+      }
+    };
+    if (isHelpOpen) {
+      document.addEventListener('keydown', handleKeyDown);
+      // Wait for render then focus
+      setTimeout(() => helpCloseBtnRef.current?.focus(), 50);
+    }
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isHelpOpen]);
+
   
   // Single Source of Truth for Messages and Scores
   const [evaluations, setEvaluations] = useState<{score: number | null, message: string, expression: string}[]>([

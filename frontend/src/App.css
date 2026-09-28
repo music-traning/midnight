@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: 'Noto Sans JP', sans-serif;
+  --font-sans: 'Noto Sans JP', system-ui, sans-serif;
   --font-serif: 'Playfair Display', serif;
   --color-accent: #d4af37;
   --color-accent-hover: #f0ce62;
@@ -17,7 +17,25 @@ body {
   color: #e6dfd1;
 }
 
-/* Base custom styles that Tailwind might not cover exactly */
+@utility custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.2) transparent;
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.2);
+    border-radius: 4px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.3);
+  }
+}
+
+/* Animations */
 .pulse-dot {
   animation: pulse-dot-anim 1.5s infinite;
 }
@@ -27,10 +45,29 @@ body {
   100% { opacity: 1; }
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.2);
-  border-radius: 4px;
+@keyframes slide-in-bottom {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.animate-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+.slide-in-from-bottom-4 {
+  animation: slide-in-bottom 0.3s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
