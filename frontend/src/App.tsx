@@ -733,10 +733,10 @@ function App() {
   const hasMoreEvaluations = !isTyping && currentIndex < evaluations.length - 1;
 
   return (
-    <div className="h-[100dvh] bg-bg-dark text-gray-200 font-sans flex flex-col relative overflow-hidden">
+    <div className="min-h-[100dvh] h-auto md:h-[100dvh] bg-bg-dark text-gray-200 font-sans flex flex-col relative overflow-x-hidden overflow-y-auto md:overflow-hidden">
       <div className="fixed inset-0 bg-[url('/back.png')] bg-cover bg-center pointer-events-none z-0 opacity-40" />
       
-      <div className="max-w-7xl mx-auto w-full px-2 md:px-4 py-2 md:py-4 flex flex-col flex-1 relative z-10 h-full">
+      <div className="max-w-7xl mx-auto w-full px-2 md:px-4 py-2 md:py-4 flex flex-col flex-1 relative z-10 h-auto md:h-full">
         
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end border-b border-accent/20 pb-2 mb-2 md:pb-3 md:mb-3 shrink-0 relative">
           <div className="flex items-baseline gap-2 md:gap-4">
@@ -758,7 +758,7 @@ function App() {
 
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4 flex-1 min-h-0">
           
-          <div className="col-span-1 md:col-span-7 lg:col-span-8 relative w-full h-[450px] md:h-full">
+          <div className="col-span-1 md:col-span-7 lg:col-span-8 relative w-full h-[400px] min-h-[350px] md:h-full">
             
             {/* LIVE Indicator */}
             {isMonitoring && (
@@ -965,7 +965,7 @@ function App() {
         </div>
         
         {/* Footer */}
-        <footer className="absolute bottom-1 md:bottom-2 left-1/2 -translate-x-1/2 text-[10px] md:text-xs text-gray-500 hover:text-gray-300 transition-colors z-50">
+        <footer className="mt-4 mb-2 text-center md:absolute md:bottom-2 md:left-1/2 md:-translate-x-1/2 md:mt-0 md:mb-0 text-[10px] md:text-xs text-gray-500 hover:text-gray-300 transition-colors z-50 w-full md:w-auto">
           <a href="https://note.com/jazzy_begin" target="_blank" rel="noopener noreferrer">
             © 2026 buro
           </a>
