@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export default async function handler(req, res) {
+  console.log("API Key exists?:", !!process.env.GEMINI_API_KEY);
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -72,7 +73,7 @@ ${JSON.stringify(payload)}
     
     return res.status(200).json(data);
   } catch (error) {
-    console.error("Gemini API Error:", error);
+    console.error("[API Error Details]:", error);
     return res.status(500).json({ error: 'Failed to generate content' });
   }
 }
