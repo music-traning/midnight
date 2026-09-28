@@ -5,7 +5,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { type, payload } = req.body;
+  const { type, payload, language = "ja" } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
@@ -60,6 +60,10 @@ ${JSON.stringify(payload)}
 ]`;
     }
 
+    
+    const langRule = "\n\n[IMPORTANT] If the user selected language is 'en', you MUST output all text in the 'message' field in natural, cool native English like a cinematic Jazz bar master. If 'ja', output in Japanese.\nUser selected language: " + language;
+    prompt += langRule;
+    
     const result = await model.generateContent(prompt);
     let rawText = result.response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
     const data = JSON.parse(rawText);

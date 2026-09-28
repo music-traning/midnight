@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { UI_TEXT } from './i18n';
-const T = UI_TEXT.ja;
 import './App.css';
 import MidiWriter from 'midi-writer-js';
 
@@ -114,6 +113,8 @@ function playCountSound(ctx: AudioContext, isHigh: boolean) {
 }
 
 function App() {
+  const [language, setLanguage] = useState<'ja' | 'en'>('ja');
+  const T = UI_TEXT[language];
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [isMonitoring, setIsMonitoring] = useState(false);
@@ -123,7 +124,7 @@ function App() {
   
   // Single Source of Truth for Messages and Scores
   const [evaluations, setEvaluations] = useState<{score: number | null, message: string, expression: string}[]>([
-    { score: null, message: "よし、いい感じだ。\nまずは今日のフレーズを聴かせてくれ。\nどんな感じで弾くか、楽しみにしているよ。", expression: "neutral" }
+    { score: null, message: T.initialMessage, expression: "neutral" }
   ]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isTyping, setIsTyping] = useState(false);
@@ -251,7 +252,7 @@ function App() {
       const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'chat', payload: msg })
+        body: JSON.stringify({ type: 'chat', payload: msg, language })
       });
       if (!response.ok) throw new Error('API Error');
       const data = await response.json();
@@ -260,7 +261,7 @@ function App() {
     } catch (e) {
       console.error(e);
       if (reqId !== aiRequestCountRef.current) return;
-      setEvaluations([{ score: null, message: 'すまん、ちょっと聞き取れなかった。もう一度言ってくれないか？', expression: 'neutral' }]);
+      setEvaluations([{ score: null, message: T.chatError, expression: 'neutral' }]);
     }
   };
 
@@ -397,9 +398,9 @@ function App() {
     } catch (e: any) {
       console.error('Calibration failed', e);
       if (e.message === 'timeout') {
-        alert('マイクが測定音を拾えませんでした。全体の測定を中止します。');
+        alert(T.calibTimeoutAlert);
       } else {
-        alert('マイクへのアクセスに失敗しました。');
+        alert(T.calibAccessAlert);
       }
       cleanup();
     }
@@ -613,7 +614,7 @@ function App() {
           if (false) { // Disabled env check on client
             const noKeyEvals = allLoopsData.map(d => ({
               score: d.score,
-              message: `${d.loop}周目のスコアは${d.score}点だ。APIキーが未設定みたいだな。`,
+              message: `${d.loop}周目のスコアは${d.score}点だ。APIキーが{T.notSet}みたいだな。`,
               expression: 'point'
             }));
             if (wasAutoStopped) {
@@ -630,7 +631,7 @@ function App() {
             const response = await fetch('/api/gemini', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ type: 'evaluate', payload: allLoopsData })
+              body: JSON.stringify({ type: 'evaluate', payload: allLoopsData, language })
             });
             if (!response.ok) throw new Error('API Error');
             const dataArray = await response.json();
@@ -657,7 +658,7 @@ function App() {
             if (reqId !== aiRequestCountRef.current) return;
             const fallbackEvals = allLoopsData.map(d => ({
               score: d.score,
-              message: `${d.loop}周目の解析中にエラーが起きたようだ。`,
+              message: T.evalLoopError(d.loop),
               expression: 'neutral'
             }));
             if (wasAutoStopped) {
@@ -671,7 +672,7 @@ function App() {
         } catch (err) {
           console.error('[Phase 4/7] Error:', err);
           if (reqId !== aiRequestCountRef.current) return;
-          setEvaluations([{ score: null, message: "解析に失敗したな。もう一度頼む。", expression: "neutral" }]);
+          setEvaluations([{ score: null, message: T.evalError, expression: "neutral" }]);
           setIsAnalyzing(false);
         }
       };
@@ -741,19 +742,27 @@ function App() {
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end border-b border-accent/20 pb-2 mb-2 md:pb-3 md:mb-3 shrink-0 relative">
           <div className="flex items-baseline gap-2 md:gap-4">
             <h1 className="font-serif text-accent text-xl md:text-3xl italic tracking-wide m-0">
-              🎵 Midnight Session
+              🎵 {T.appTitle}
             </h1>
-            <p className="text-gray-400 text-xs md:text-sm m-0 hidden md:block">The Jazz Guitar Trainer - ジャズを、もっと深く、もっと楽しく。</p>
+            <p className="text-gray-400 text-xs md:text-sm m-0 hidden md:block">{T.appSubtitle}</p>
           </div>
-          <button 
-            onClick={() => setIsHelpOpen(true)}
-            className="absolute right-0 top-0 md:relative text-gray-500 hover:text-accent transition-colors p-1 md:p-0"
-            title="ヘルプ"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </button>
+          
+          <div className="absolute right-0 top-0 md:relative flex items-center gap-3 md:gap-4">
+            <button 
+              onClick={() => setLanguage(lang => lang === 'ja' ? 'en' : 'ja')}
+              className="text-[10px] md:text-xs font-bold px-2 py-1 border border-gray-600 rounded text-gray-400 hover:text-accent hover:border-accent transition-colors"
+            >
+              {language === 'ja' ? 'EN / JA' : 'JA / EN'}
+            </button>
+            <button 
+              onClick={() => setIsHelpOpen(true)}
+              className="text-gray-500 hover:text-accent transition-colors p-1 md:p-0"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+          </div>
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4 flex-1 min-h-0">
@@ -764,7 +773,7 @@ function App() {
             {isMonitoring && (
               <div className="absolute top-2 left-2 md:top-4 md:left-4 bg-black/60 px-2 py-1 md:px-3 md:py-1.5 rounded-full flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-bold text-white border border-white/10 backdrop-blur-md z-30">
                 <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-red-dot rounded-full pulse-dot"></div>
-                LIVE
+                {T.liveIndicator}
               </div>
             )}
 
@@ -794,7 +803,7 @@ function App() {
                   onClick={handleBubbleClick}
                 >
                   <div className="absolute -top-4 left-6 md:left-8 bg-gray-900 border border-gray-600 px-3 py-1 rounded-lg text-accent text-[10px] md:text-xs font-bold">
-                    マスター
+                    {T.masterLabel}
                   </div>
                   <div className="text-gray-100 text-sm md:text-lg leading-relaxed font-medium min-h-[5rem] md:min-h-[7rem] whitespace-pre-wrap select-none">
                     {displayedMsg.split(/\\n|\n/).map((line, i) => (
@@ -820,11 +829,11 @@ function App() {
             <div className="bg-panel backdrop-blur-xl rounded-xl border border-border-dark p-3 md:p-4 flex flex-col gap-2 md:gap-3 shadow-2xl flex-1 md:h-full md:custom-scrollbar md:overflow-y-auto">
               
               <h2 className="text-accent text-[10px] md:text-xs font-bold flex items-center gap-2 uppercase tracking-widest border-b border-accent/20 pb-1.5 m-0">
-                👤 USER MENU
+                👤 {T.userMenu}
               </h2>
 
               <div className="flex flex-col gap-1 md:gap-1.5">
-                <label className="text-[10px] md:text-xs text-gray-400">🎵 キー設定</label>
+                <label className="text-[10px] md:text-xs text-gray-400">{T.keySetting}</label>
                 <select 
                   value={musicKey}
                   onChange={(e) => setMusicKey(e.target.value)}
@@ -838,14 +847,14 @@ function App() {
               </div>
               
               <div className="flex flex-col gap-1 md:gap-1.5">
-                <label className="text-[10px] md:text-xs text-gray-400">🎤 入力デバイス</label>
+                <label className="text-[10px] md:text-xs text-gray-400">{T.inputDevice}</label>
                 <select 
                   value={selectedDeviceId} 
                   onChange={(e) => setSelectedDeviceId(e.target.value)}
                   disabled={isMonitoring}
                   className="bg-black/50 border border-border-dark text-white p-1.5 md:p-2 rounded-lg outline-none focus:border-accent truncate text-xs md:text-sm"
                 >
-                  <option value="" disabled>デバイスを選択</option>
+                  <option value="" disabled>{T.selectDevice}</option>
                   {devices.map((d: MediaDeviceInfo) => (
                     <option key={d.deviceId} value={d.deviceId}>
                       {d.label || `Device ${d.deviceId.slice(0, 5)}`}
@@ -856,7 +865,7 @@ function App() {
 
               <div className="flex flex-col gap-1 md:gap-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] md:text-xs text-gray-400">⏱ 遅延補正 (ms)</label>
+                  <label className="text-[10px] md:text-xs text-gray-400">{T.latencyCalib}</label>
                   <button onClick={runCalibration} disabled={isMonitoring || isCalibrating} className="text-[9px] md:text-[10px] bg-accent/20 text-accent px-2 py-0.5 rounded hover:bg-accent/40 disabled:opacity-50 border border-accent/50">
                     {isCalibrating ? `測定中... (${calibrationStep}/4)` : '測定'}
                   </button>
@@ -867,22 +876,22 @@ function App() {
               </div>
 
               <div className="flex flex-col gap-1 md:gap-1.5">
-                <label className="text-[10px] md:text-xs text-gray-400">⏱ メトロノーム</label>
+                <label className="text-[10px] md:text-xs text-gray-400">{T.metronome}</label>
                 <select 
                   value={metronomeMode} 
                   onChange={(e) => setMetronomeMode(e.target.value as any)}
                   disabled={isMonitoring}
                   className="bg-black/50 border border-border-dark text-white p-1.5 md:p-2 rounded-lg outline-none focus:border-accent text-xs md:text-sm"
                 >
-                  <option value="off">オフ</option>
-                  <option value="on-beat">表拍 (1,2,3,4)</option>
-                  <option value="off-beat">裏拍 (2,4)</option>
-                  <option value="4-1">4-1 (4拍に1回)</option>
+                  <option value="off">{T.metroOff}</option>
+                  <option value="on-beat">{T.metroOnBeat}</option>
+                  <option value="off-beat">{T.metroOffBeat}</option>
+                  <option value="4-1">{T.metro41}</option>
                 </select>
               </div>
 
               <div className="flex flex-col gap-1 md:gap-1.5">
-                <label className="text-[10px] md:text-xs text-gray-400">🎼 コード進行 (バッキング有)</label>
+                <label className="text-[10px] md:text-xs text-gray-400">{T.chordProgression}</label>
                 <div className="flex gap-1 md:gap-1.5">
                   {getProgressionForKey(musicKey).map((chord, index) => (
                     <div key={index} className="flex-1 text-center bg-black/50 border border-border-dark p-1 md:p-1.5 rounded-lg text-[10px] md:text-xs text-gray-300">
@@ -898,7 +907,7 @@ function App() {
                   {currentEval?.score !== null && currentEval?.score !== undefined ? (
                     <div className="text-center p-2 md:p-3 bg-black/40 border border-accent/20 rounded-xl animate-in fade-in slide-in-from-bottom-2 duration-300">
                       <div className="text-[9px] md:text-[10px] text-gray-400 uppercase tracking-widest mb-0.5">
-                        {evaluations.length > 1 ? `LOOP ${currentIndex + 1} SCORE` : 'TOTAL SCORE'}
+                        {evaluations.length > 1 ? T.loopScore(currentIndex + 1) : T.totalScore}
                       </div>
                       <div className="text-3xl md:text-4xl font-serif text-accent">{currentEval.score}</div>
                     </div>
@@ -906,7 +915,7 @@ function App() {
                   
                   {theoryNotesState.length > 0 && !isMonitoring && !isAnalyzing ? (
                     <button onClick={exportMidi} className="w-full py-1.5 rounded-lg border border-accent/50 text-accent hover:bg-accent/10 text-[10px] md:text-xs transition-colors animate-in fade-in duration-300">
-                      💾 MIDIダウンロード
+                      💾 {T.midiDownload}
                     </button>
                   ) : null}
                 </div>
@@ -931,11 +940,11 @@ function App() {
                   disabled={isAnalyzing || countdown !== null}
                 >
                   {isMonitoring ? (
-                    <><div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-red-dot"></div> 録音を停止する</>
+                    <><div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-red-dot"></div> {T.stopRecording}</>
                   ) : countdown !== null ? (
-                    <>準備中...</>
+                    <>{T.preparing}</>
                   ) : (
-                    <><div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${isAnalyzing ? 'bg-gray-500' : 'bg-red-dot pulse-dot'}`}></div> {isAnalyzing ? 'AI解析中...' : '録音を開始する'}</>
+                    <><div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${isAnalyzing ? 'bg-gray-500' : 'bg-red-dot pulse-dot'}`}></div> {isAnalyzing ? T.analyzing : T.startRecording}</>
                   )}
                 </button>
               </div>
@@ -949,7 +958,7 @@ function App() {
           <span className="text-accent text-lg md:text-xl">🎤</span>
           <input 
             type="text" 
-            placeholder="マスターに話しかける..." 
+            placeholder={T.chatPlaceholder} 
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleChat()}
@@ -967,7 +976,7 @@ function App() {
         {/* Footer */}
         <footer className="mt-4 mb-2 text-center md:absolute md:bottom-2 md:left-1/2 md:-translate-x-1/2 md:mt-0 md:mb-0 text-[10px] md:text-xs text-gray-500 hover:text-gray-300 transition-colors z-50 w-full md:w-auto">
           <a href="https://note.com/jazzy_begin" target="_blank" rel="noopener noreferrer">
-            © 2026 buro
+            {T.footerCopyright}
           </a>
         </footer>
       </div>
@@ -987,42 +996,42 @@ function App() {
             </button>
             
             <h2 className="text-accent text-lg md:text-xl font-bold border-b border-accent/20 pb-2 mb-4 font-serif">
-              Midnight Session について
+              {T.helpTitle}
             </h2>
             
             <div className="space-y-4 md:space-y-6 text-sm md:text-base text-gray-300 leading-relaxed">
               <p className="text-sm">
-                あなたのジャズギター・インプロビゼーションをAIが聴き込み、マスターが辛口で評価するブラウザ完結型のトレーニングアプリです。
+                {T.helpDesc}
               </p>
 
               <div>
                 <h3 className="text-accent font-bold mb-1 flex items-center gap-1.5 text-sm md:text-base">
-                  <span>🎧</span> ヘッドホン・イヤホン必須
+                  <span>🎧</span> {T.helpHeadphoneTitle}
                 </h3>
                 <p className="text-xs md:text-sm text-gray-400">
-                  スピーカーから音を出すと、バッキングトラックやクリック音をマイクが拾ってしまい、AIが正確に解析できません。演奏時は必ずヘッドホンやイヤホンを使用してください。
+                  {T.helpHeadphoneDesc}
                 </p>
               </div>
 
               <div>
                 <h3 className="text-accent font-bold mb-1 flex items-center gap-1.5 text-sm md:text-base">
-                  <span>⏱</span> 遅延補正（キャリブレーション）について
+                  <span>⏱</span> {T.helpCalibTitle}
                 </h3>
                 <p className="text-xs md:text-sm text-gray-400">
-                  環境によって音が届くまでにわずかな遅延が発生します。「測定」ボタンから実測を行うことで、より正確なリズム評価が可能になります。
+                  {T.helpCalibDesc}
                 </p>
                 <div className="mt-2 p-2.5 md:p-3 bg-black/40 border border-accent/30 rounded text-xs text-gray-400">
-                  <strong className="text-accent/80 block mb-1">⚠️ 測定時のご注意:</strong>
-                  測定時はテスト音が鳴ります。マイクが音を拾えるよう、測定の一瞬だけ<strong>「ヘッドホンを外してマイク（またはピックアップ）に近づける」</strong>か、オーディオインターフェースの<strong>「ステレオミックス（ループバック）をオン」</strong>にしてください。
+                  <strong className="text-accent/80 block mb-1">{T.helpCalibWarn}</strong>
+                  {T.helpCalibWarnDesc}
                 </div>
               </div>
 
               <div>
                 <h3 className="text-accent font-bold mb-1 flex items-center gap-1.5 text-sm md:text-base">
-                  <span>💾</span> MIDIダウンロード
+                  <span>💾</span> {T.helpMidiTitle}
                 </h3>
                 <p className="text-xs md:text-sm text-gray-400">
-                  評価完了後、あなたが弾いたフレーズ（AIが認識したノートデータ）をMIDIファイルとしてダウンロードできます。自身のタイム感やフレーズの振り返りに活用してください。
+                  {T.helpMidiDesc}
                 </p>
               </div>
             </div>
